@@ -52,6 +52,8 @@ _LEGACY_KEY_DEFAULTS: dict[str, Any] = {
     "chapter_cache_hours": 6,
     "chapter_list_show_cover": True,
     "default_source_id": 0,
+    "search_result_ranking": True,
+    "search_display_limit": 20,
     "temp_dir": "",
 }
 
@@ -104,6 +106,8 @@ CONFIG_GROUPS: dict[str, list[str]] = {
         "chapter_cache_hours",
         "chapter_list_show_cover",
         "default_source_id",
+        "search_result_ranking",
+        "search_display_limit",
         "temp_dir",
     ],
 }

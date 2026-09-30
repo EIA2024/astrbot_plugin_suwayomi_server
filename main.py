@@ -36,8 +36,10 @@ from .suwayomi.cards import (
 from .suwayomi.client import SuwayomiClient, SuwayomiError
 from .suwayomi.config import get_config_value, migrate_legacy_config
 from .suwayomi.models import Manga, SearchResult
+from .suwayomi.ranking import rank_items
 from .suwayomi.service import (
     STATUS_EMOJI,
+    _bounded_int,
     fmt_chapter_display,
     fmt_chapter_label,
     fmt_chapter_num,
@@ -915,44 +917,76 @@ class SuwayomiPlugin(Star):
                 except Exception as e:
                     logger.warning(f"[{PLUGIN_NAME}] 搜索源 {src.name} 失败: {e}")
 
-            if not all_results:
+            ranking_on = self._config_bool(
+                get_config_value(self.config, "search_result_ranking", True), True
+            )
+            display_limit = _bounded_int(
+                get_config_value(self.config, "search_display_limit", 20), 20, 1, 50
+            )
+
+            # 展平为 (manga, 源名)；排序开启时统一按标题相关度混排，编号在
+            # 排序之后分配，保证「订阅 <编号>」与显示一致（同分保持源顺序）
+            flat: list[tuple[Manga, str]] = [
+                (m, source_name)
+                for source_name, result in all_results
+                for m in result.mangas
+            ]
+            if ranking_on:
+                flat, _scores = rank_items(
+                    search_query, flat, title_of=lambda item: item[0].title
+                )
+            if not flat:
                 yield event.plain_result("未找到相关漫画，请确认关键词。")
                 return
 
-            lines = []
+            lines: list[str] = []
             idx = 1
             cache: dict[str, Manga] = {}
             card_rows: list[dict] = []
-            for source_name, result in all_results:
-                if result.mangas:
-                    lines.append(f"\n🔍 搜索结果（源: {source_name}）:")
-                    for m in result.mangas:
-                        status = STATUS_EMOJI.get(m.status, "未知")
-                        lines.append(f"  [{idx}] {m.title} - {status}")
-                        cache[str(idx)] = m
-                        card_rows.append({
-                            "index": idx,
-                            "title": m.title,
-                            "status": m.status,
-                            "source": source_name,
-                            "thumbnail_url": m.thumbnail_url,
-                        })
-                        idx += 1
 
-            if idx == 1:
-                yield event.plain_result("未找到相关漫画，请确认关键词。")
-                return
+            def _append_row(m: Manga, source_name: str) -> None:
+                nonlocal idx, lines
+                cache[str(idx)] = m
+                card_rows.append({
+                    "index": idx,
+                    "title": m.title,
+                    "status": m.status,
+                    "source": source_name,
+                    "thumbnail_url": m.thumbnail_url,
+                })
+                idx += 1
 
-            lines.append("\n回复「漫画 订阅 <编号>」订阅，如「漫画 订阅 1」")
+            if ranking_on:
+                total = len(flat)
+                lines.append(f"\n🔍 搜索结果（{total} 条，按相关度排序）:")
+                for m, source_name in flat[:display_limit]:
+                    status = STATUS_EMOJI.get(m.status, "未知")
+                    lines.append(f"  [{idx}] {m.title} - {status}（{source_name}）")
+                    _append_row(m, source_name)
+                tail = "回复「漫画 订阅 <编号>」订阅，如「漫画 订阅 1」"
+                if idx - 1 < total:
+                    tail = f"已按相关度显示前 {idx - 1} 条（共 {total} 条）\n{tail}"
+                lines.append("\n" + tail)
+                subtitle = f"按相关度排序 · {total} 条"
+            else:
+                # 关闭排序：保持旧版按源分组的输出格式
+                for source_name, result in all_results:
+                    if result and result.mangas:
+                        lines.append(f"\n🔍 搜索结果（源: {source_name}）:")
+                        for m in result.mangas:
+                            status = STATUS_EMOJI.get(m.status, "未知")
+                            lines.append(f"  [{idx}] {m.title} - {status}")
+                            _append_row(m, source_name)
+                subtitle = (
+                    f"{' · '.join(dict.fromkeys(n for n, r in all_results if r))}"
+                    f" · {len(card_rows)} 条"
+                )
+
             text = "\n".join(lines)
             self._set_search_cache(event.unified_msg_origin, cache)
 
             if self._result_cards_enabled():
                 try:
-                    subtitle = (
-                        f"{' · '.join(dict.fromkeys(source_name for source_name, _ in all_results))}"
-                        f" · {len(card_rows)} 条"
-                    )
                     tmpldata = build_search_card(
                         card_rows,
                         subtitle,

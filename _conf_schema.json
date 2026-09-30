@@ -201,6 +201,20 @@
         "default": 0,
         "hint": "0 表示搜索所有已安装源"
       },
+      "search_result_ranking": {
+        "description": "搜索结果按相关度排序",
+        "type": "bool",
+        "default": true,
+        "hint": "跨源混合排序：标题与关键词越相关越靠前（相等 > 包含 > 简称子序列 > 部分重叠）；同分保持源顺序。关闭后恢复按源分组的原始顺序"
+      },
+      "search_display_limit": {
+        "description": "搜索结果显示条数",
+        "type": "int",
+        "default": 20,
+        "min": 1,
+        "max": 50,
+        "hint": "开启相关度排序后最多显示的搜索结果条数，超出部分以「已显示前 X 条」提示"
+      },
       "temp_dir": {
         "description": "临时文件目录",
         "type": "string",
@@ -233,5 +247,7 @@
   "chapter_cache_hours": { "type": "int", "default": 6, "invisible": true },
   "chapter_list_show_cover": { "type": "bool", "default": true, "invisible": true },
   "default_source_id": { "type": "int", "default": 0, "invisible": true },
+  "search_result_ranking": { "type": "bool", "default": true, "invisible": true },
+  "search_display_limit": { "type": "int", "default": 20, "invisible": true },
   "temp_dir": { "type": "string", "default": "", "invisible": true }
 }
