@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from plugin_pkg.main import SuwayomiPlugin
 from plugin_pkg.suwayomi.cards import CardCache
+from plugin_pkg.suwayomi.bangumi import Resolution
 from plugin_pkg.suwayomi.models import Manga, SearchResult, Source
 
 QUERY = "我的首推是恶役大小姐"
@@ -16,6 +17,8 @@ def _plugin(**config_overrides):
     plugin.sub_mgr = MagicMock()
     plugin.config = {
         "result_cards_enabled": False,
+        # 单测默认禁用 Bangumi 扩展（避免真实网络请求）；fan-out 用例单独开启并 mock
+        "search_alias_expansion": False,
         **config_overrides,
     }
     plugin.get_kv_data = AsyncMock(return_value={})
@@ -233,3 +236,69 @@ async def test_merge_disabled_when_ranking_off():
     })
     results = [msg async for msg in plugin.search_manga(_event(), QUERY)]
     assert results[0].count(dup_title) == 2
+
+
+@pytest.mark.asyncio
+async def test_round2_fanout_rescues_abbreviation(monkeypatch):
+    """第一轮全是低分噪音 → Bangumi 别名探针捞出正解并置顶。"""
+    plugin = _plugin(search_alias_expansion=True)
+    target_alias = "我的首推是恶役大小姐（爱藏版）"
+    resolution = Resolution(
+        by_subject={777: [target_alias]},
+        confident=True,
+        best_alias_score=898.0,
+    )
+    monkeypatch.setattr(
+        "plugin_pkg.main.resolve_aliases", AsyncMock(return_value=resolution)
+    )
+    plugin.client.get_sources = AsyncMock(return_value=_sources())
+
+    async def _fake(src_id, query, page=1):
+        if query == "我推恶役":
+            return SearchResult(mangas=[_manga("恶役千金今天也在暗中华丽的行动着", 101)],
+                                has_next_page=False)
+        if query == target_alias:
+            return SearchResult(mangas=[_manga("我的首推是恶役大小姐", 202)],
+                                has_next_page=False)
+        return SearchResult(mangas=[], has_next_page=False)
+
+    plugin.client.search_manga = AsyncMock(side_effect=_fake)
+
+    event = _event("/漫画 搜索 我推恶役")
+    results = [msg async for msg in plugin.search_manga(event, "我推恶役")]
+    text = results[0]
+    assert "Bangumi 别名" in text  # 透明提示行
+    assert text.index("[1] 我的首推是恶役大小姐") < text.index("恶役千金")
+    assert plugin._get_cached_manga("aiocqhttp:group:g1", "1").title == "我的首推是恶役大小姐"
+    probed = [c.args[1] for c in plugin.client.search_manga.await_args_list]
+    assert target_alias in probed
+
+
+@pytest.mark.asyncio
+async def test_round2_wrong_resolution_injects_no_noise(monkeypatch):
+    """解析不置信时：错误解析结果不得进入展示，也不产生提示行噪音。"""
+    plugin = _plugin(search_alias_expansion=True)
+    resolution = Resolution(
+        by_subject={1: ["完全无关的推倒熊猫大叔"]},
+        confident=False,
+        best_alias_score=120.0,
+    )
+    monkeypatch.setattr(
+        "plugin_pkg.main.resolve_aliases", AsyncMock(return_value=resolution)
+    )
+    plugin.client.get_sources = AsyncMock(return_value=_sources())
+
+    async def _fake(src_id, query, page=1):
+        if query == "推子":
+            return SearchResult(mangas=[_manga("推倒熊猫大叔短篇集", 101)],
+                                has_next_page=False)
+        return SearchResult(mangas=[_manga("完全无关的推倒熊猫大叔", 999)],
+                            has_next_page=False)
+
+    plugin.client.search_manga = AsyncMock(side_effect=_fake)
+    event = _event("/漫画 搜索 推子")
+    results = [msg async for msg in plugin.search_manga(event, "推子")]
+    text = results[0]
+    assert "Bangumi" not in text  # 无扩展强命中 → 无提示行
+    assert "[1] 推倒熊猫大叔短篇集" in text  # 第一轮结果原样保留
+    assert "完全无关的推倒熊猫大叔" not in text  # 探针噪声未混入展示

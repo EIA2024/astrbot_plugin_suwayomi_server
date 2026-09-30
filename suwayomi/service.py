@@ -413,8 +413,8 @@ async def resolve_manga(
 
 
 def merge_duplicate_results(
-    pool: list[tuple[Manga, str]],
-) -> list[tuple[Manga, str]]:
+    pool: list[tuple[Manga, str, int | None]],
+) -> list[tuple[Manga, str, int | None]]:
     """按归一化标题合并跨源重复的搜索结果。
 
     同一部作品常被多个源同时收录且标题一字不差（归一化后相等即视为
@@ -423,7 +423,7 @@ def merge_duplicate_results(
     - 展示源名去重后用「、」连接；订阅时订代表副本，可用
       「搜索 关键词 源名」锁定单源来指定其它副本
     """
-    groups: dict[str, list[tuple[Manga, str]]] = {}
+    groups: dict[str, list[tuple[Manga, str, int | None]]] = {}
     order: list[str] = []
     for entry in pool:
         key = normalize_for_rank(entry[0].title)
@@ -432,19 +432,22 @@ def merge_duplicate_results(
             order.append(key)
         groups[key].append(entry)
 
-    merged: list[tuple[Manga, str]] = []
+    merged: list[tuple[Manga, str, int | None]] = []
     for key in order:
         entries = groups[key]
         rep = entries[0][0]
-        for manga, _ in entries[1:]:
+        for manga, _, _ in entries[1:]:
             rep_trunc = looks_truncated(rep.title)
             item_trunc = looks_truncated(manga.title)
             if (rep_trunc and not item_trunc) or (
                 not rep_trunc and not item_trunc and len(manga.title) > len(rep.title)
             ):
                 rep = manga
-        sources = list(dict.fromkeys(source_name for _, source_name in entries))
-        merged.append((rep, "、".join(sources)))
+        sources = list(dict.fromkeys(source_name for _, source_name, _ in entries))
+        provenance = next(
+            (prov for _, _, prov in entries if prov is not None), None
+        )
+        merged.append((rep, "、".join(sources), provenance))
     return merged
 
 

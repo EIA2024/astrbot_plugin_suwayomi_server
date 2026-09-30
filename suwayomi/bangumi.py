@@ -24,6 +24,7 @@ import aiohttp
 from .ranking import (
     STRONG_MATCH_THRESHOLD,
     jp_variant,
+    normalize_for_rank,
     score_title,
 )
 
@@ -180,3 +181,116 @@ async def _resolve_via(
     resolution.best_alias_score = best_alias_score(query, resolution)
     resolution.confident = resolution.best_alias_score >= STRONG_MATCH_THRESHOLD
     return resolution
+
+
+# 探针首段切分用的连接词（取别名第一段做 4 字头，如「转生王女与…」→「转生王女」）
+_CONJ_RE = re.compile(r"[与和及跟之的×·、，,：:／/＋+]+")
+
+
+def _probe_candidates(names: list[str], sid: int) -> list[str]:
+    """单个条目贡献的探针候选：全部别名 + 长别名的首段。
+
+    站点收录常自选译法（实测 311s.com 收录「转生王女和天才千金…」
+    用「和」而非「与」，全名探针会漏），长别名首段（4 字头）作为
+    兜底探针。
+    """
+    out: list[str] = []
+    for name in names:
+        out.append(name)
+        normalized = normalize_for_rank(name)
+        if len(normalized) > 6:
+            first_seg = _CONJ_RE.split(str(name).strip())[0].strip()
+            if first_seg and first_seg != name and first_seg not in out:
+                out.append(first_seg)
+    return out
+
+
+def build_probes(
+    query: str,
+    resolution: Resolution,
+    max_probes: int = 3,
+) -> list[tuple[str, int]]:
+    """挑选拿去源站重搜的 (探针, 来源条目id)，按与关键词的相关度降序。
+
+    过滤：归一化长度 ≥4（实测 3 字探针在严格源返回 200+ 条且目标
+    可能不在第一页）、与关键词归一化相同者（第一轮已搜过）、汉字
+    占比过低者（英文名对中文源站无意义）。
+    """
+    query_norm = normalize_for_rank(query)
+    seen = {query_norm}
+    candidates: list[tuple[float, str, int]] = []
+    for sid, names in resolution.by_subject.items():
+        for candidate in _probe_candidates(names, sid):
+            normalized = normalize_for_rank(candidate)
+            if len(normalized) < 4 or normalized in seen:
+                continue
+            # 汉字占比过低（英文名对中文源站无意义）则跳过
+            han_count = len(_HAN_RE.findall(normalized))
+            if han_count < max(2, 0.5 * len(normalized)):
+                continue
+            seen.add(normalized)
+            candidates.append((score_title(query, candidate), candidate, sid))
+    candidates.sort(key=lambda item: (-item[0], item[1]))
+    return [(name, sid) for _, name, sid in candidates[:max_probes]]
+
+
+# 溯源增强的保守校准：探针捞回的结果不能仅凭溯源继承条目最强别名分
+# ——否则泛探针在源站模糊搜回的噪声会整体抬到 top-N。规则：
+# ① 结果标题包含条目某别名（归一化子串）→ 全额继承（官方别名等价）；
+# ② 仅溯源关联 → 结果自身对 query 的分数需 ≥ _PROVENANCE_BASE_FLOOR，
+#    且增强分封顶 _PROVENANCE_BOOST_CAP（略低于强命中线，噪声无法独自过线）。
+_PROVENANCE_BASE_FLOOR = 650.0
+_PROVENANCE_BOOST_CAP = 849.0
+
+
+def alias_boost(
+    query: str,
+    title: str,
+    provenance_sid: int | None,
+    resolution: Resolution | None,
+    base_score: float | None = None,
+) -> float:
+    """结果的别名增强分（0 表示无增强）。
+
+    「结果 ↔ 条目」关联判定：① 结果标题包含该条目某别名的归一化形式
+    （标题「航海王」包含别名「航海王」→ 继承「query 命中官方别名」的分）；
+    ② 第二轮探测携带的溯源条目 provenance（受 base_score 门槛与封顶约束）。
+    仅在解析置信时生效，防止错误解析抬高错误结果。
+    """
+    if not resolution or not resolution.confident:
+        return 0.0
+    title_norm = normalize_for_rank(title)
+    if not title_norm:
+        return 0.0
+    best = 0.0
+    for sid, names in resolution.by_subject.items():
+        alias_linked = any(
+            (alias_norm := normalize_for_rank(alias)) and alias_norm in title_norm
+            for alias in names
+        )
+        from_probe = provenance_sid == sid
+        if not alias_linked and not from_probe:
+            continue
+        if from_probe and not alias_linked:
+            # 溯源-only：结果自身须与 query 有基础相关度，且不继承满分
+            if base_score is not None and base_score < _PROVENANCE_BASE_FLOOR:
+                continue
+            best = max(
+                best,
+                min(
+                    max(score_title(query, alias) for alias in names),
+                    _PROVENANCE_BOOST_CAP,
+                ),
+            )
+        else:
+            best = max(best, max(score_title(query, alias) for alias in names))
+    return best
+
+
+def sanitize_for_message(text: str, limit: int = 50) -> str:
+    """第三方文本（Bangumi 别名/源站标题）进入消息前的最小清洗。
+
+    剥离换行/制表/RTL 控制符（防止伪造系统提示行），限长防爆屏。
+    """
+    cleaned = re.sub("[" + chr(13) + chr(10) + chr(9) + chr(0x202A) + "-" + chr(0x202E) + chr(0x2066) + "-" + chr(0x2069) + "]+", " ", str(text or ""))
+    return cleaned.strip()[:limit]

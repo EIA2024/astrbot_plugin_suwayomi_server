@@ -207,6 +207,12 @@
         "default": true,
         "hint": "跨源混合排序：标题与关键词越相关越靠前（相等 > 包含 > 简称子序列 > 部分重叠）；同分保持源顺序。关闭后恢复按源分组的原始顺序"
       },
+      "search_alias_expansion": {
+        "description": "Bangumi 别名扩展搜索",
+        "type": "bool",
+        "default": true,
+        "hint": "关键词无强命中时（如用简称「我推恶役」搜索），通过 Bangumi 番组计划解析官方译名/别名并自动换名重搜；需访问 api.bgm.tv，失败时自动跳过"
+      },
       "search_refresh_truncated_titles": {
         "description": "修复被源站截断的标题",
         "type": "bool",
@@ -256,5 +262,6 @@
   "search_result_ranking": { "type": "bool", "default": true, "invisible": true },
   "search_display_limit": { "type": "int", "default": 20, "invisible": true },
   "search_refresh_truncated_titles": { "type": "bool", "default": true, "invisible": true },
+  "search_alias_expansion": { "type": "bool", "default": true, "invisible": true },
   "temp_dir": { "type": "string", "default": "", "invisible": true }
 }

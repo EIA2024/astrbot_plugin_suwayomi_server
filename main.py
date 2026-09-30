@@ -35,8 +35,19 @@ from .suwayomi.cards import (
 )
 from .suwayomi.client import SuwayomiClient, SuwayomiError
 from .suwayomi.config import get_config_value, migrate_legacy_config
+from .suwayomi.bangumi import (
+    alias_boost,
+    build_probes,
+    confident_aliases,
+    resolve_aliases,
+    sanitize_for_message,
+)
 from .suwayomi.models import Manga
-from .suwayomi.ranking import rank_items
+from .suwayomi.ranking import (
+    STRONG_MATCH_THRESHOLD,
+    normalize_for_rank,
+    score_title,
+)
 from .suwayomi.service import (
     STATUS_EMOJI,
     _bounded_int,
@@ -911,22 +922,6 @@ class SuwayomiPlugin(Star):
                     max_sources=5,
                 )
 
-            async def _search_source(src):
-                try:
-                    result = await asyncio.wait_for(
-                        self.client.search_manga(src.id, search_query), timeout=15
-                    )
-                    return src.display_name, result
-                except Exception as e:
-                    logger.warning(f"[{PLUGIN_NAME}] 搜索源 {src.name} 失败: {e}")
-                    return src.display_name, None
-
-            # 并发请求全部源（与 AI 工具路径一致），单源 15s 超时；
-            # 失败源记为 None，不阻塞其它源的结果
-            responses = await asyncio.gather(
-                *(_search_source(src) for src in target_sources)
-            )
-
             ranking_on = self._config_bool(
                 get_config_value(self.config, "search_result_ranking", True), True
             )
@@ -937,35 +932,162 @@ class SuwayomiPlugin(Star):
                 get_config_value(self.config, "search_refresh_truncated_titles", True),
                 True,
             )
+            expand_on = ranking_on and self._config_bool(
+                get_config_value(self.config, "search_alias_expansion", True), True
+            )
 
-            # 展平为 (manga, 源名)；排序开启时统一按标题相关度混排，编号在
-            # 排序之后分配，保证「订阅 <编号>」与显示一致（同分保持源顺序）
-            flat: list[tuple[Manga, str]] = [
-                (m, source_name)
+            async def _search_source(src):
+                try:
+                    result = await asyncio.wait_for(
+                        self.client.search_manga(src.id, search_query), timeout=15
+                    )
+                    return src.display_name, result
+                except Exception as e:
+                    logger.warning(f"[{PLUGIN_NAME}] 搜索源 {src.name} 失败: {e}")
+                    return src.display_name, None
+
+            # Bangumi 别名解析与源搜索并行执行，互不等待
+            resolve_task = (
+                asyncio.create_task(resolve_aliases(search_query)) if expand_on else None
+            )
+            # 并发请求全部源（与 AI 工具路径一致），单源 15s 超时；
+            # 失败源记为 None，不阻塞其它源的结果
+            responses = await asyncio.gather(
+                *(_search_source(src) for src in target_sources)
+            )
+            resolution = None
+            if resolve_task is not None:
+                try:
+                    # 整体预算兜底：Bangumi 请求最坏等待不允许拖住用户命令，
+                    # 超时按「解析失败」静默跳过扩展
+                    resolution = await asyncio.wait_for(resolve_task, timeout=20)
+                except Exception:
+                    resolution = None
+
+            # pool: (manga, 源显示名, Bangumi 溯源条目id|None)；排序开启时
+            # 统一按标题相关度混排，编号在排序后分配（同分保持源顺序）
+            pool: list[tuple[Manga, str, int | None]] = [
+                (m, source_name, None)
                 for source_name, result in responses
                 if result
                 for m in result.mangas
             ]
-            if refresh_on and flat:
+            if refresh_on and pool:
                 # 源站列表页截断的长标题（我的首推是恶役...）从详情页补全，
                 # 失败保留原标题（排序有反向包含兜底）
                 try:
                     await refresh_truncated_titles(
-                        self.client, [m for m, _ in flat]
+                        self.client, [m for m, _, _ in pool]
                     )
                 except Exception as e:
                     logger.warning(f"[{PLUGIN_NAME}] 截断标题刷新失败: {e}")
 
-            if ranking_on and flat:
+            if ranking_on and pool:
                 # 跨源同书合并（归一化标题相等）：省出展示位，来源并列标注
-                flat = merge_duplicate_results(flat)
+                pool = merge_duplicate_results(pool)
+
+            def _rank_pool(items):
+                decorated = []
+                for i, (m, source_name, prov) in enumerate(items):
+                    base = score_title(search_query, m.title)
+                    if resolution is not None:
+                        base = max(
+                            base,
+                            alias_boost(
+                                search_query, m.title, prov, resolution,
+                                base_score=base,
+                            ),
+                        )
+                    decorated.append((base, i, (m, source_name, prov)))
+                decorated.sort(key=lambda x: (-x[0], x[1]))
+                return [it for _, _, it in decorated], [sc for sc, _, _ in decorated]
 
             if ranking_on:
-                flat, _scores = rank_items(
-                    search_query, flat, title_of=lambda item: item[0].title
-                )
-            if not flat:
-                yield event.plain_result("未找到相关漫画，请确认关键词。")
+                pool, scores = _rank_pool(pool)
+                best = scores[0] if scores else 0.0
+            else:
+                best = 0.0
+
+            # ── 第二轮：无强命中时用 Bangumi 别名有界重搜 ──
+            expansion_note = ""
+            suggestion = ""
+            if (
+                ranking_on
+                and expand_on
+                and resolution is not None
+                and len(normalize_for_rank(search_query)) >= 2
+                and best < STRONG_MATCH_THRESHOLD
+            ):
+                probes = build_probes(search_query, resolution)
+                if probes:
+
+                    async def _probe(src, query, sid):
+                        try:
+                            result = await asyncio.wait_for(
+                                self.client.search_manga(src.id, query), timeout=15
+                            )
+                            return result, src.display_name, sid
+                        except Exception:
+                            return None, src.display_name, sid
+
+                    probe_responses = await asyncio.gather(
+                        *(
+                            _probe(src, query, sid)
+                            for query, sid in probes
+                            for src in target_sources
+                        )
+                    )
+                    seen_ids = {m.id for m, _, _ in pool}
+                    added: list[tuple[Manga, str, int | None]] = []
+                    for result, source_name, sid in probe_responses:
+                        if not result:
+                            continue
+                        for m in result.mangas:
+                            if m.id in seen_ids:
+                                continue
+                            seen_ids.add(m.id)
+                            added.append((m, source_name, sid))
+                    if added:
+                        if refresh_on:
+                            try:
+                                await refresh_truncated_titles(
+                                    self.client, [m for m, _, _ in added]
+                                )
+                            except Exception as e:
+                                logger.warning(f"[{PLUGIN_NAME}] 截断标题刷新失败: {e}")
+                        merged, merged_scores = _rank_pool(
+                            merge_duplicate_results(pool + added)
+                        )
+                        if merged_scores and merged_scores[0] >= STRONG_MATCH_THRESHOLD:
+                            # 扩展带来强命中才并入展示；否则保持第一轮结果
+                            pool, scores = merged, merged_scores
+                            aliases = confident_aliases(search_query, resolution)
+                            used = "、".join(
+                                sanitize_for_message(a) for a in aliases[:3]
+                            ) or "、".join(
+                                sanitize_for_message(qr) for qr, _ in probes
+                            )
+                            expansion_note = (
+                                f"\n💡 关键词无强命中，已通过 Bangumi 别名"
+                                f"「{used[:80]}」扩展搜索"
+                            )
+                if best < STRONG_MATCH_THRESHOLD and not expansion_note:
+                    aliases = (
+                        confident_aliases(search_query, resolution)
+                        if resolution.confident
+                        else []
+                    )
+                    if aliases:
+                        cleaned = "》/《".join(
+                            sanitize_for_message(a) for a in aliases
+                        )
+                        suggestion = (
+                            f"\n💡 你说的可能是《{cleaned}》？"
+                            "试试完整标题或用别名重新搜索"
+                        )
+
+            if not pool:
+                yield event.plain_result("未找到相关漫画，请确认关键词。" + suggestion)
                 return
 
             lines: list[str] = []
@@ -986,9 +1108,11 @@ class SuwayomiPlugin(Star):
                 idx += 1
 
             if ranking_on:
-                total = len(flat)
+                total = len(pool)
+                if expansion_note:
+                    lines.append(expansion_note)
                 lines.append(f"\n🔍 搜索结果（{total} 条，按相关度排序）:")
-                for m, source_name in flat[:display_limit]:
+                for m, source_name, _prov in pool[:display_limit]:
                     status = STATUS_EMOJI.get(m.status, "未知")
                     lines.append(f"  [{idx}] {m.title} - {status}（{source_name}）")
                     _append_row(m, source_name)
@@ -997,6 +1121,8 @@ class SuwayomiPlugin(Star):
                     tail = f"已按相关度显示前 {idx - 1} 条（共 {total} 条）\n{tail}"
                 lines.append("\n" + tail)
                 subtitle = f"按相关度排序 · {total} 条"
+                if suggestion:
+                    lines.append(suggestion)
             else:
                 # 关闭排序：保持旧版按源分组的输出格式
                 for source_name, result in responses:

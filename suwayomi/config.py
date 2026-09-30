@@ -55,6 +55,7 @@ _LEGACY_KEY_DEFAULTS: dict[str, Any] = {
     "search_result_ranking": True,
     "search_display_limit": 20,
     "search_refresh_truncated_titles": True,
+    "search_alias_expansion": True,
     "temp_dir": "",
 }
 
@@ -110,6 +111,7 @@ CONFIG_GROUPS: dict[str, list[str]] = {
         "search_result_ranking",
         "search_display_limit",
         "search_refresh_truncated_titles",
+        "search_alias_expansion",
         "temp_dir",
     ],
 }

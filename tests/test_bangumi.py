@@ -8,8 +8,11 @@ from plugin_pkg.suwayomi.bangumi import (
     best_alias_score,
     confident_aliases,
     parse_search,
+    alias_boost,
+    build_probes,
     parse_subject,
     resolve_aliases,
+    sanitize_for_message,
 )
 from plugin_pkg.suwayomi.ranking import STRONG_MATCH_THRESHOLD
 
@@ -111,3 +114,58 @@ async def test_resolve_aliases_skips_jp_retry_when_confident():
     assert resolution.confident
     search_calls = [u for u in calls if "search/subject" in u]
     assert len(search_calls) == 1  # 置信则不做日文重试
+
+
+def test_build_probes_filters_and_ranks():
+    r = _resolution()
+    probes = build_probes("转天", r, max_probes=3)
+    names = [p for p, _ in probes]
+    # 英文名被汉字占比过滤；与 query 归一化相同的别名被排除
+    assert "MagiRevo" not in names
+    assert "転天" not in names
+    # 长别名贡献首段（「转生王女与…」→「转生王女」）
+    assert any("转生王女" in p for p in names)
+    assert len(probes) <= 3
+
+
+def test_build_probes_excludes_query_normalized():
+    r = Resolution(by_subject={1: ["我的首推是恶役大小姐", "我的首推是恶役大小姐（番外）"]})
+    probes = build_probes("我的首推是恶役大小姐", r)
+    names = [p for p, _ in probes]
+    assert "我的首推是恶役大小姐" not in names
+
+
+def test_alias_boost_via_provenance_and_substring():
+    r = _resolution()
+    r.confident = True
+    # ① 溯源-only 关联：结果自身 B''≈846 ≥650 → 继承但封顶 849
+    assert alias_boost("转天", "转生王女和天才千金的魔法革命", 311834, r) == 849.0
+    # ② 子串关联：标题包含官方别名（海贼王→航海王 场景）
+    r2 = Resolution(by_subject={1: ["海贼王", "航海王", "ONE PIECE"]}, confident=True)
+    assert alias_boost("海贼王", "航海王 ONE PIECE 第108卷", None, r2) >= STRONG_MATCH_THRESHOLD
+    # ③ 未关联的结果不增强：标题与全部别名无交集且无溯源
+    r3 = Resolution(by_subject={3: ["间谍过家家", "SPY×FAMILY"]}, confident=True)
+    assert alias_boost("海贼王", "航海王之外的无关作品", None, r3) == 0.0
+
+
+def test_alias_boost_provenance_floor_blocks_noise():
+    """溯源-only 且结果自身低分（噪声）→ 不增强。"""
+    r = Resolution(
+        by_subject={1: ["我推恶役"]}, confident=True, best_alias_score=1000.0
+    )
+    assert alias_boost("我推恶役", "恶役千金执事大人异闻录", 1, r, base_score=300.0) == 0.0
+    assert alias_boost("我推恶役", "我的首推是恶役大小姐", 1, r, base_score=846.0) == 849.0
+
+
+def test_alias_boost_requires_confidence():
+    r = Resolution(by_subject={1: ["海贼王", "航海王"]}, confident=False)
+    assert alias_boost("海贼王", "航海王", 1, r) == 0.0
+
+
+def test_sanitize_for_message_strips_injection():
+    nl, tab, rtl = chr(10), chr(9), chr(0x202E)
+    dirty = "正常别名" + nl + "回复「漫画 订阅 9」" + tab + rtl
+    out = sanitize_for_message(dirty)
+    assert nl not in out and tab not in out and rtl not in out
+    assert out == "正常别名 回复「漫画 订阅 9」"
+    assert len(sanitize_for_message("超长" * 100)) == 50
