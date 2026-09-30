@@ -332,3 +332,20 @@ class TestSearchBestMatch:
 
         assert err is None
         assert manga is found
+
+    @pytest.mark.asyncio
+    async def test_picks_best_match_within_source(self):
+        from suwayomi.models import Manga, Source
+        from suwayomi.service import search_best_match
+
+        sources = [Source(id="1", name="CopyManga", lang="zh", display_name="拷贝漫画")]
+        noise = Manga(id=1, source_id=1, url="", title="安达与岛村的宠物狗")
+        target = Manga(id=2, source_id=1, url="", title="安达与岛村")
+        client = MagicMock()
+        client.get_sources = AsyncMock(return_value=sources)
+        client.search_manga = AsyncMock(return_value=MagicMock(mangas=[noise, target]))
+
+        manga, err = await search_best_match(client, {"default_source_id": 0}, "安达与岛村")
+
+        assert err is None
+        assert manga is target  # 源内按相关度选优，而非盲取第一条

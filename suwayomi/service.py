@@ -14,7 +14,7 @@ from . import PLUGIN_NAME
 from .config import get_config_value
 from .client import SuwayomiError
 from .models import Chapter, Manga, Source
-from .ranking import looks_truncated, normalize_for_rank
+from .ranking import looks_truncated, normalize_for_rank, rank_items
 
 if TYPE_CHECKING:
     from ..utils.subscription import SubscriptionManager
@@ -507,11 +507,14 @@ async def search_best_match(
     for src in target_sources:
         try:
             result = await client.search_manga(src.id, name)
-            if result.mangas:
-                return result.mangas[0], None
         except Exception as e:
             logger.warning(
                 f"[{_PLUGIN_NAME}] 批量订阅搜索源 {src.name} 失败: {e}"
             )
+            continue
+        if result.mangas:
+            # 源内按标题相关度选优，不再盲取第一条
+            ranked, _ = rank_items(name, result.mangas, title_of=lambda m: m.title)
+            return ranked[0], None
 
     return None, "未找到匹配结果"

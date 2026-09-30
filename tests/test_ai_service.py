@@ -534,3 +534,48 @@ async def test_unsubscribe_manga_success():
     assert result["manga_id"] == 10
     assert result["title"] == "一拳超人"
     sub_mgr.unsubscribe.assert_awaited_once_with(10, "test:123")
+
+
+@pytest.mark.asyncio
+async def test_agent_search_results_sorted_by_relevance():
+    """跨源结果按标题相关度降序（与 /漫画 搜索 共用打分器）。"""
+    from suwayomi.models import SearchResult
+
+    class _Client:
+        async def get_sources(self):
+            return [_source("1", "甲源"), _source("2", "乙源")]
+
+        async def search_manga(self, source_id, query, page=1):
+            if str(source_id) == "1":
+                return SearchResult(mangas=[_manga(1, "恶役大小姐的执事大人", 1)])
+            return SearchResult(mangas=[_manga(2, "我的首推是恶役大小姐", 2)])
+
+    result = await search_manga_for_agent(
+        _Client(), {"default_source_id": 0}, "我的首推是恶役大小姐"
+    )
+    titles = [r["title"] for r in result["results"]]
+    assert titles == ["我的首推是恶役大小姐", "恶役大小姐的执事大人"]
+
+
+@pytest.mark.asyncio
+async def test_agent_search_sorts_within_source_before_limit():
+    """每源先按相关度排序再截取：真目标排在源内第 6 位也能进前 5。"""
+    from suwayomi.models import SearchResult
+
+    mangas = [_manga(i, f"恶役千金衍生作品第{i}季", 1) for i in range(5)]
+    mangas.append(_manga(99, "我的首推是恶役大小姐", 1))
+
+    class _Client:
+        async def get_sources(self):
+            return [_source("1", "甲源")]
+
+        async def search_manga(self, source_id, query, page=1):
+            return SearchResult(mangas=list(mangas))
+
+    result = await search_manga_for_agent(
+        _Client(),
+        {"default_source_id": 0, "ai_results_per_source": 5},
+        "我的首推是恶役大小姐",
+    )
+    titles = [r["title"] for r in result["results"]]
+    assert titles and titles[0] == "我的首推是恶役大小姐"
