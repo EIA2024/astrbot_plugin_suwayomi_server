@@ -46,6 +46,7 @@ from .suwayomi.service import (
     fmt_delivery_failure_message,
     get_or_fetch_chapters,
     match_source_hint,
+    merge_duplicate_results,
     normalize_zh,
     refresh_truncated_titles,
     resolve_chapter,
@@ -954,6 +955,10 @@ class SuwayomiPlugin(Star):
                     )
                 except Exception as e:
                     logger.warning(f"[{PLUGIN_NAME}] 截断标题刷新失败: {e}")
+
+            if ranking_on and flat:
+                # 跨源同书合并（归一化标题相等）：省出展示位，来源并列标注
+                flat = merge_duplicate_results(flat)
 
             if ranking_on:
                 flat, _scores = rank_items(

@@ -155,3 +155,81 @@ async def test_truncated_refresh_failure_keeps_original():
     plugin.client.fetch_manga_details = AsyncMock(side_effect=Exception("timeout"))
     results = [msg async for msg in plugin.search_manga(_event(), QUERY)]
     assert "[1] 我的首推是恶役... - " in results[0]
+
+
+@pytest.mark.asyncio
+async def test_identical_cross_source_results_merged():
+    """两个源返回同一本书 → 合并为一条，来源并列，省出一个展示位。"""
+    plugin = _plugin(search_display_limit=3)
+    dup_title = "唯我独占恶役千金的娇羞"
+    _set_search(plugin, {
+        "11": [_manga(dup_title, 101), _manga("恶役千金系作品甲", 102)],
+        "22": [_manga(dup_title, 201), _manga("恶役千金系作品乙", 202)],
+    })
+    results = [msg async for msg in plugin.search_manga(_event(), QUERY)]
+    text = results[0]
+    assert text.count(dup_title) == 1
+    assert "（动漫屋、漫画社）" in text
+    # 省出展示位：limit=3 时能看到 3 部不同作品
+    assert "恶役千金系作品甲" in text and "恶役千金系作品乙" in text
+    assert "[3]" in text and "[4]" not in text
+    merged = plugin._get_cached_manga("aiocqhttp:group:g1", "1")
+    assert merged.title == dup_title
+
+
+@pytest.mark.asyncio
+async def test_truncated_copy_refreshed_then_merged():
+    """生产链路：截断副本先被刷新为完整标题 → 与另一源副本合并。"""
+    plugin = _plugin()
+    _set_search(plugin, {
+        "11": [_manga("唯我独占恶役千金的娇羞", 101)],
+        "22": [_manga("唯我独占恶役千金的...", 201)],
+    })
+    plugin.client.fetch_manga_details = AsyncMock(
+        return_value=_manga("唯我独占恶役千金的娇羞", 201)
+    )
+    results = [msg async for msg in plugin.search_manga(_event(), QUERY)]
+    text = results[0]
+    assert "唯我独占恶役千金的娇羞 - 连载中（动漫屋、漫画社）" in text
+    assert "唯我独占恶役千金的..." not in text
+    assert text.count("[1]") == 1 and "[2]" not in text
+
+
+@pytest.mark.asyncio
+async def test_truncated_and_complete_not_merged_when_refresh_fails():
+    """刷新失败时截断副本与完整标题归一化不相等 → 不误合并。"""
+    plugin = _plugin()
+    _set_search(plugin, {
+        "11": [_manga("唯我独占恶役千金的娇羞", 101)],
+        "22": [_manga("唯我独占恶役千金的...", 201)],
+    })
+    plugin.client.fetch_manga_details = AsyncMock(side_effect=Exception("no refresh"))
+    results = [msg async for msg in plugin.search_manga(_event(), QUERY)]
+    assert results[0].count("[1]") == 1
+    assert results[0].count("[2]") == 1
+
+
+@pytest.mark.asyncio
+async def test_merge_normalization_folds_punctuation_and_traditional():
+    """繁简/标点差异的同书副本也合并（归一化相等）。"""
+    plugin = _plugin()
+    _set_search(plugin, {
+        "11": [_manga("唯我独占恶役千金的娇羞", 101)],
+        "22": [_manga("唯我獨佔惡役千金的嬌羞！", 201)],
+    })
+    results = [msg async for msg in plugin.search_manga(_event(), QUERY)]
+    assert results[0].count("[1]") == 1
+    assert results[0].count("[2]") == 0
+    assert "（动漫屋、漫画社）" in results[0]
+
+
+@pytest.mark.asyncio
+async def test_merge_disabled_when_ranking_off():
+    plugin = _plugin(search_result_ranking=False)
+    dup_title = "唯我独占恶役千金的娇羞"
+    _set_search(plugin, {
+        "11": [_manga(dup_title, 101)],
+        "22": [_manga(dup_title, 201)],
+    })
+    results = [msg async for msg in plugin.search_manga(_event(), QUERY)]
+    assert results[0].count(dup_title) == 2

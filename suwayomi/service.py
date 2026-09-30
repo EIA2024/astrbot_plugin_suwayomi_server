@@ -14,7 +14,7 @@ from . import PLUGIN_NAME
 from .config import get_config_value
 from .client import SuwayomiError
 from .models import Chapter, Manga, Source
-from .ranking import looks_truncated
+from .ranking import looks_truncated, normalize_for_rank
 
 if TYPE_CHECKING:
     from ..utils.subscription import SubscriptionManager
@@ -410,6 +410,42 @@ async def resolve_manga(
     except Exception as e:
         logger.error(f"[{_PLUGIN_NAME}] resolve_manga error: {e}")
         return None, "查找漫画失败。"
+
+
+def merge_duplicate_results(
+    pool: list[tuple[Manga, str]],
+) -> list[tuple[Manga, str]]:
+    """按归一化标题合并跨源重复的搜索结果。
+
+    同一部作品常被多个源同时收录且标题一字不差（归一化后相等即视为
+    同书），占据相邻的两个展示位。合并规则：
+    - 代表 manga 优先取标题完整（非 ... 截断）且最长的副本
+    - 展示源名去重后用「、」连接；订阅时订代表副本，可用
+      「搜索 关键词 源名」锁定单源来指定其它副本
+    """
+    groups: dict[str, list[tuple[Manga, str]]] = {}
+    order: list[str] = []
+    for entry in pool:
+        key = normalize_for_rank(entry[0].title)
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(entry)
+
+    merged: list[tuple[Manga, str]] = []
+    for key in order:
+        entries = groups[key]
+        rep = entries[0][0]
+        for manga, _ in entries[1:]:
+            rep_trunc = looks_truncated(rep.title)
+            item_trunc = looks_truncated(manga.title)
+            if (rep_trunc and not item_trunc) or (
+                not rep_trunc and not item_trunc and len(manga.title) > len(rep.title)
+            ):
+                rep = manga
+        sources = list(dict.fromkeys(source_name for _, source_name in entries))
+        merged.append((rep, "、".join(sources)))
+    return merged
 
 
 async def refresh_truncated_titles(
