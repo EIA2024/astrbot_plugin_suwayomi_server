@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import shutil
 import tempfile
 from pathlib import Path
@@ -18,6 +19,13 @@ from ..suwayomi import PLUGIN_NAME
 
 _PLUGIN_NAME = PLUGIN_NAME
 
+# 文件打包路径（下载/AI 发送/自动推送 file 模式）的整章页数硬上限：
+# 正常章节远低于此值，仅用于挡住恶意源宣告的超大页列表
+FILE_DELIVERY_MAX_PAGES = 300
+
+# 单张图片响应的字节上限（防恶意源用超大响应打满内存/磁盘）
+_MAX_IMAGE_BYTES = 64 * 1024 * 1024
+
 
 async def download_one(
     session: aiohttp.ClientSession, url: str, dest: Path, retries: int = 3
@@ -26,7 +34,18 @@ async def download_one(
         try:
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
                 if resp.status == 200:
-                    data = await resp.read()
+                    chunks: list[bytes] = []
+                    size = 0
+                    async for chunk in resp.content.iter_chunked(1 << 16):
+                        size += len(chunk)
+                        if size > _MAX_IMAGE_BYTES:
+                            logger.warning(
+                                f"[{_PLUGIN_NAME}] 图片响应超过 "
+                                f"{_MAX_IMAGE_BYTES // (1024 * 1024)}MB 上限，放弃: {url}"
+                            )
+                            return False
+                        chunks.append(chunk)
+                    data = b"".join(chunks)
                     ext = ".jpg"
                     ct = resp.headers.get("Content-Type", "")
                     if "png" in ct:
@@ -95,6 +114,30 @@ async def download_images(
         raise
 
 
+def _is_private_host(hostname: str | None) -> bool:
+    """绝对 URL 的主机是否指向私网/环回/链路本地等不可达外网的目标。
+
+    只识别字面 IP 与 localhost；域名解析到内网（DNS rebinding 类）不在此
+    防护范围内，属已知限制。
+    """
+    host = (hostname or "").strip().strip("[]")
+    if not host:
+        return False
+    if host.lower() == "localhost":
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_reserved
+        or ip.is_multicast
+    )
+
+
 def resolve_image_url(
     client: SuwayomiClient,
     thumbnail_url: str | None,
@@ -106,7 +149,9 @@ def resolve_image_url(
     like ``/api/v1/manga/{id}/thumbnail``. Relative paths always carry the
     given ``auth_headers``; absolute URLs only when they point at the same
     server (scheme + host + port), to avoid leaking Suwayomi credentials to
-    third-party hosts. Returns ``(None, None)`` for empty input.
+    third-party hosts. 源扩展可控的第三方绝对地址若指向私网/环回目标
+    则拒绝请求（防 SSRF），调用方按「无封面」降级。Returns
+    ``(None, None)`` for empty or rejected input.
     """
     if not thumbnail_url:
         return None, None
@@ -114,17 +159,25 @@ def resolve_image_url(
     if thumbnail_url.startswith(("http://", "https://")):
         url = thumbnail_url
         use_headers = None
+        same_server = False
         if client.server_url:
             server = urlparse(client.server_url)
             target = urlparse(thumbnail_url)
             server_port = server.port or (443 if server.scheme == "https" else 80 if server.scheme == "http" else None)
             target_port = target.port or (443 if target.scheme == "https" else 80 if target.scheme == "http" else None)
-            if (
+            same_server = (
                 server.scheme == target.scheme
                 and server.hostname == target.hostname
                 and server_port == target_port
-            ):
+            )
+            if same_server:
                 use_headers = auth_headers
+        if not same_server and _is_private_host(urlparse(thumbnail_url).hostname):
+            logger.warning(
+                f"[{_PLUGIN_NAME}] 拒绝下载指向私网/环回地址的第三方封面: "
+                f"{urlparse(thumbnail_url).hostname}"
+            )
+            return None, None
     else:
         url = client.build_image_url(thumbnail_url)
         use_headers = auth_headers

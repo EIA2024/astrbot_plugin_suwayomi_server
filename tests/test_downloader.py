@@ -5,7 +5,12 @@ from unittest.mock import AsyncMock
 import pytest
 
 from plugin_pkg.suwayomi.client import SuwayomiClient
-from plugin_pkg.utils.downloader import download_cover, download_images, download_one
+from plugin_pkg.utils.downloader import (
+    download_cover,
+    download_images,
+    download_one,
+    resolve_image_url,
+)
 
 
 @pytest.mark.asyncio
@@ -52,9 +57,13 @@ async def test_download_one_retries_then_succeeds(tmp_path):
         def __init__(self, status):
             self.status = status
             self.headers = {"Content-Type": "image/jpeg"}
+            self.content = self  # download_one 以 iter_chunked 流式读取
 
         async def read(self):
             return b"data"
+
+        async def iter_chunked(self, n):
+            yield b"data"
 
         async def __aenter__(self):
             return self
@@ -222,3 +231,44 @@ async def test_download_cover_swallows_download_exception(tmp_path, monkeypatch)
 
     assert path is None
     assert tmp_dir is None
+
+
+class TestResolveImageUrlSsrfGuard:
+    """第三方绝对封面地址指向私网/环回 → 拒绝下载（防 SSRF）。"""
+
+    def _client(self, url="http://localhost:4567"):
+        return SuwayomiClient(url, "none", "", "")
+
+    def test_rejects_metadata_service_ip(self):
+        url, headers = resolve_image_url(
+            self._client(), "http://169.254.169.254/latest/meta-data", {"Authorization": "Bearer x"}
+        )
+        assert url is None and headers is None
+
+    def test_rejects_private_lan_ip(self):
+        url, headers = resolve_image_url(
+            self._client(), "http://10.0.0.5:8080/cover.jpg", {"Authorization": "Bearer x"}
+        )
+        assert url is None and headers is None
+
+    def test_rejects_localhost_hostname(self):
+        url, headers = resolve_image_url(
+            self._client(), "http://localhost:9999/cover.jpg", {"Authorization": "Bearer x"}
+        )
+        assert url is None and headers is None
+
+    def test_allows_same_server_private_address_with_auth(self):
+        client = self._client("http://192.168.1.5:4567")
+        auth = {"Authorization": "Bearer x"}
+        url, headers = resolve_image_url(
+            client, "http://192.168.1.5:4567/api/v1/manga/1/thumbnail", auth
+        )
+        # Suwayomi 本机部署在内网是常态：同源私网地址必须放行并携带凭据
+        assert url is not None and headers is auth
+
+    def test_allows_public_absolute_url_without_auth(self):
+        url, headers = resolve_image_url(
+            self._client(), "https://cdn.example.com/cover.jpg", {"Authorization": "Bearer x"}
+        )
+        assert url == "https://cdn.example.com/cover.jpg"
+        assert headers is None

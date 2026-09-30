@@ -349,3 +349,47 @@ class TestSearchBestMatch:
 
         assert err is None
         assert manga is target  # 源内按相关度选优，而非盲取第一条
+
+
+# ── sanitize_for_message（自 bangumi.py 迁入，消息出口统一清洗） ──
+
+def test_sanitize_for_message_strips_injection():
+    from suwayomi.service import sanitize_for_message
+    nl, tab, rtl = chr(10), chr(9), chr(0x202E)
+    dirty = "正常别名" + nl + "回复「漫画 订阅 9」" + tab + rtl
+    out = sanitize_for_message(dirty)
+    assert nl not in out and tab not in out and rtl not in out
+    assert out == "正常别名 回复「漫画 订阅 9」"
+    assert len(sanitize_for_message("超长" * 100)) == 50
+
+
+def test_fmt_chapter_label_sanitizes_dirty_chapter_name():
+    """T3-02 回归：源站章节名不得携带换行进入消息（防伪造提示行）。"""
+    ch = _ch("第1话\n📢 回复「漫画 订阅 9」领取", 1)
+    label = fmt_chapter_label(ch, {1.0: 1})
+    assert "\n" not in label
+    assert label.startswith("#1 第1话 ")
+
+
+def test_fmt_chapter_display_sanitizes_dirty_chapter_name():
+    ch = _ch("第1话\t伪造\t系统行", 1)
+    displayed = fmt_chapter_display(ch)
+    assert "\t" not in displayed
+    assert displayed == "第1话 伪造 系统行"
+
+
+def test_merge_duplicate_results_dedupes_joined_source_names():
+    """T3-13 回归：跨两轮合并时来源名按组成源去重，不出现「A、B、B」。"""
+    from suwayomi.models import Manga
+    from suwayomi.service import merge_duplicate_results
+
+    def _m(mid):
+        return Manga(id=mid, source_id=1, url="", title="同一本书")
+
+    pool = [
+        (_m(1), "动漫屋、漫画社", None),   # 第一轮合并后的连接串
+        (_m(2), "漫画社", 7),             # 第二轮探针重新捞回的单源副本
+    ]
+    merged = merge_duplicate_results(pool)
+    assert len(merged) == 1
+    assert merged[0][1] == "动漫屋、漫画社"

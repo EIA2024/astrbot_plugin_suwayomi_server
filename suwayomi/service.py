@@ -68,13 +68,22 @@ def fmt_chapter_num(num: float) -> int | float | str:
         return "?"
 
 
+def sanitize_for_message(text: str, limit: int = 50) -> str:
+    """第三方文本（源站标题/章节名、Bangumi 别名）进入消息前的最小清洗。
+
+    剥离换行/制表/RTL 控制符（防止伪造系统提示行），限长防爆屏。
+    """
+    cleaned = re.sub("[" + chr(13) + chr(10) + chr(9) + chr(0x202A) + "-" + chr(0x202E) + chr(0x2066) + "-" + chr(0x2069) + "]+", " ", str(text or ""))
+    return cleaned.strip()[:limit]
+
+
 def fmt_chapter_display(ch: Chapter) -> str:
     """Return the human-readable chapter name for display in messages.
     Uses chapter.name if non-empty, otherwise falls back to 第X话.
     """
     name = (ch.name or "").strip()
     if name:
-        return name
+        return sanitize_for_message(name, limit=80)
     return f"第{fmt_chapter_num(ch.chapter_number)}话"
 
 
@@ -82,7 +91,7 @@ def fmt_chapter_label(ch: Chapter, num_counts: dict[float, int]) -> str:
     num = fmt_chapter_num(ch.chapter_number)
     dup_tag = f" (ID:{ch.id})" if num_counts.get(ch.chapter_number, 0) > 1 else ""
     if ch.name:
-        return f"#{num} {ch.name}{dup_tag}"
+        return f"#{num} {sanitize_for_message(ch.name, limit=80)}{dup_tag}"
     return f"#{num}{dup_tag}"
 
 
@@ -405,7 +414,9 @@ async def resolve_manga(
         for m in mangas:
             status = STATUS_EMOJI.get(m.status, "未知")
             src_name = src_map.get(str(m.source_id), f"源{m.source_id}")
-            lines.append(f"  ID {m.id}: {m.title} [{status}] ({src_name})")
+            lines.append(
+                f"  ID {m.id}: {sanitize_for_message(m.title, limit=80)} [{status}] ({src_name})"
+            )
         return None, "\n".join(lines)
     except Exception as e:
         logger.error(f"[{_PLUGIN_NAME}] resolve_manga error: {e}")
@@ -443,7 +454,16 @@ def merge_duplicate_results(
                 not rep_trunc and not item_trunc and len(manga.title) > len(rep.title)
             ):
                 rep = manga
-        sources = list(dict.fromkeys(source_name for _, source_name, _ in entries))
+        # 合并可能跨越两轮（第一轮合并后的条目源名已是「、」连接串），按
+        # 组成源逐个去重再拼接，避免「动漫屋、漫画社、漫画社」
+        seen_sources: set[str] = set()
+        sources: list[str] = []
+        for _, source_name, _ in entries:
+            for part in str(source_name or "").split("、"):
+                part = part.strip()
+                if part and part not in seen_sources:
+                    seen_sources.add(part)
+                    sources.append(part)
         provenance = next(
             (prov for _, _, prov in entries if prov is not None), None
         )

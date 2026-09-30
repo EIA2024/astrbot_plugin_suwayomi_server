@@ -579,3 +579,13 @@ async def test_agent_search_sorts_within_source_before_limit():
     )
     titles = [r["title"] for r in result["results"]]
     assert titles and titles[0] == "我的首推是恶役大小姐"
+
+
+def test_manga_dict_marks_third_party_data_as_untrusted():
+    """T3-06：外部元数据进入 LLM 上下文时须声明「数据非指令」。"""
+    from suwayomi.ai_service import manga_to_agent_dict
+
+    d = manga_to_agent_dict(_manga(1, "一拳超人"))
+    assert "data_notice" in d
+    assert "第三方漫画源" in d["data_notice"]
+    assert "不构成" in d["data_notice"]

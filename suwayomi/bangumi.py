@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
 import urllib.parse
 from dataclasses import dataclass, field
 
@@ -161,22 +162,32 @@ async def resolve_aliases(
 
     逐个端点尝试（bases 由调用方按镜像配置生成），首个拿到条目的
     端点胜出；全部失败返回 None，等价于不使用 Bangumi。
-    deadline 为整条回退链的共享预算（秒）：逐端点均分剩余时间，
-    前一个端点提前成功则剩余时间留给后续端点——保证 hang 型故障
-    （慢挂而非快速失败）下回退链仍能在预算内走到后续端点。
+    deadline 为整条回退链的共享预算（秒，墙钟）：按剩余端点数均分
+    剩余时间，单个端点无论快败、慢滴还是 hang 都不能超出其切片
+    （wait_for 强制），预算耗尽立即放弃后续端点。
     """
     query = str(query or "").strip()
     if not query:
         return None
     chain = list(bases or [OFFICIAL_API_BASE])
-    remaining = deadline
-    for base in chain:
-        per_base = (remaining / len(chain)) if remaining else timeout
-        resolution = await _resolve_via(base, query, max_subjects, per_base)
+    start = time.monotonic()
+    for index, base in enumerate(chain):
+        if deadline is None:
+            per_base = timeout
+        else:
+            remaining = deadline - (time.monotonic() - start)
+            if remaining <= 0:
+                return None
+            per_base = remaining / (len(chain) - index)
+        try:
+            resolution = await asyncio.wait_for(
+                _resolve_via(base, query, max_subjects, per_base),
+                timeout=per_base,
+            )
+        except asyncio.TimeoutError:
+            continue
         if resolution is not None and resolution.by_subject:
             return resolution
-        if remaining is not None:
-            remaining -= per_base
     return None
 
 
@@ -230,7 +241,7 @@ async def _resolve_via(
 _CONJ_RE = re.compile(r"[与和及跟之的×·、，,：:／/＋+]+")
 
 
-def _probe_candidates(names: list[str], sid: int) -> list[str]:
+def _probe_candidates(names: list[str]) -> list[str]:
     """单个条目贡献的探针候选：全部别名 + 长别名的首段。
 
     站点收录常自选译法（实测 311s.com 收录「转生王女和天才千金…」
@@ -263,7 +274,7 @@ def build_probes(
     seen = {query_norm}
     candidates: list[tuple[float, str, int]] = []
     for sid, names in resolution.by_subject.items():
-        for candidate in _probe_candidates(names, sid):
+        for candidate in _probe_candidates(names):
             normalized = normalize_for_rank(candidate)
             if len(normalized) < 4 or normalized in seen:
                 continue
@@ -345,12 +356,3 @@ def alias_boost(
                 ),
             )
     return best
-
-
-def sanitize_for_message(text: str, limit: int = 50) -> str:
-    """第三方文本（Bangumi 别名/源站标题）进入消息前的最小清洗。
-
-    剥离换行/制表/RTL 控制符（防止伪造系统提示行），限长防爆屏。
-    """
-    cleaned = re.sub("[" + chr(13) + chr(10) + chr(9) + chr(0x202A) + "-" + chr(0x202E) + chr(0x2066) + "-" + chr(0x2069) + "]+", " ", str(text or ""))
-    return cleaned.strip()[:limit]

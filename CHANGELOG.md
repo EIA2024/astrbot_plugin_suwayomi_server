@@ -22,6 +22,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 - 溯源增强门槛收紧：探针结果仅凭溯源不再继承最强别名分（标题含官方别名才全额；仅溯源时要求自身 ≥650 分且封顶 849），泛探针噪声无法挤入 top-N
 - 第三方文本进入消息前剥离换行与控制符并限长：Bangumi 别名/探针名（扩展提示行）与搜索结果行中的源站标题
 - bgm 查询改 `quote(safe="")`，含 `/` 关键词不再破坏 URL 路径；`+` 多词归一为空格
+- Bangumi 回退链共享截止预算改为真链级墙钟语义：按剩余端点数均分剩余时间、单个端点多阶段请求（搜索+详情+日文重试）的墙钟总和不得超出其切片（`wait_for` 强制）、预算耗尽（含 `deadline=0`）立即放弃不再发请求
+- GraphQL 客户端会话级超时（total 60s / connect 10s）：此前无外层 `wait_for` 的路径（章节/阅读/下载的漫画解析、章节拉取、推送取页、批量订阅、更新循环）单请求最长可挂 aiohttp 默认的 5 分钟，且更新循环持锁期间手动「漫画 更新」与 WebUI 更新会排队
+- 第三方文本清洗覆盖补全（此前仅搜索结果行）：更新推送标题与章节标签、推送头与发送失败回退、订阅列表、章节列表、多结果引导、阅读/下载加载提示等全部消息出口统一清洗（`sanitize_for_message` 下沉到 `fmt_chapter_label`/`fmt_chapter_display` 与标题入链出口，函数自 `bangumi.py` 迁至 `service.py`）
+- 更新通知文本路径与手动更新 summary 同样按 24 条截断并追加「+N 话」：水位线为 0 的存量订阅一次判新可达数百章，超长消息会超出平台长度限制导致推送整体失败（卡片路径此前已截断，文本为默认路径）
+- 搜索命令协程被取消（插件热重载/卸载）时同步取消并行的 Bangumi 解析任务，不再产生失去外层兜底的孤儿任务
+- 跨两轮（首轮合并 + 探针重搜）合并时来源名按组成源去重，不再出现「动漫屋、漫画社、漫画社」
+- 文件打包路径（下载/AI 发送/自动推送 file 模式）整章页数设 300 硬上限、单图片响应设 64MB 流式上限：防恶意源宣告超大页列表/响应打满磁盘内存
+- 封面绝对 URL 指向私网/环回/链路本地地址（字面 IP 与 localhost）时拒绝下载（SSRF 防护）；同源的内网 Suwayomi 地址不受影响、照常携带凭据
+- `sanitize_filename` 补控制字符（`\x00`–`\x1f`、`\x7f`）过滤、结尾点/空格剥离与 Windows 保留名（CON/COM1 等）前缀处理
+- WebUI 配置 API 补齐搜索排序/Bangumi 六个配置键的白名单与类型校验，仪表盘设置页新增「搜索排序」分区；`server_url` 非字符串直接 400，`username`/`password`/`temp_dir`/`bangumi_mirror_url` 补字符串类型门槛、`auth_mode` 补枚举校验
+- WebUI 订阅列表与 `get_subscriptions` 容忍损坏的非数字 KV 键（与更新引擎一致跳过），单条脏数据不再使整个列表 500
+- 插件 `terminate` 等待后台任务取消传播完成，与配置保存路径行为一致
+- AI 工具返回的漫画对象增加 `data_notice` 字段，向模型声明第三方元数据是待处理数据而非指令（prompt injection 缓解）
+
+### Docs
+
+- `AGENTS.md`「Key Helpers」重写为当前依赖注入式函数的真实签名（旧清单为 0.4.7 重构前已删除的插件方法，示例照抄会 AttributeError）；Quirk 11 引用与 pydantic 版本上界同步
+- `CONTRIBUTING.md` / `docs/dev/development.md`：环境搭建改为 `uv venv` + `uv pip install -r requirements.txt pytest pytest-asyncio`（`pyproject.toml` 不入库，`uv sync` 必然失败）；测试命令统一为全量 `uv run pytest`（live 不可达自动跳过）；项目树补 `ranking.py`/`bangumi.py` 与缺失测试文件；新命令示例改用 `service.resolve_manga` 真实签名；版本号声明改为仅 `metadata.yaml`；搜索/批量订阅数据流更新为并发/排序/合并/别名扩展的现行为；封面压缩宽度 120px 更正为 320px
 
 ## [0.6.2] - 2026-09-23
 

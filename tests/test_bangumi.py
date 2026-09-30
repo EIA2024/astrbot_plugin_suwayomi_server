@@ -12,7 +12,6 @@ from plugin_pkg.suwayomi.bangumi import (
     build_probes,
     parse_subject,
     resolve_aliases,
-    sanitize_for_message,
 )
 from plugin_pkg.suwayomi.ranking import STRONG_MATCH_THRESHOLD
 
@@ -162,15 +161,6 @@ def test_alias_boost_requires_confidence():
     assert alias_boost("海贼王", "航海王", 1, r) == 0.0
 
 
-def test_sanitize_for_message_strips_injection():
-    nl, tab, rtl = chr(10), chr(9), chr(0x202E)
-    dirty = "正常别名" + nl + "回复「漫画 订阅 9」" + tab + rtl
-    out = sanitize_for_message(dirty)
-    assert nl not in out and tab not in out and rtl not in out
-    assert out == "正常别名 回复「漫画 订阅 9」"
-    assert len(sanitize_for_message("超长" * 100)) == 50
-
-
 def test_api_bases_priority_chain():
     from plugin_pkg.suwayomi.bangumi import (
         BUILTIN_MIRROR_BASES, OFFICIAL_API_BASE, api_bases,
@@ -265,3 +255,69 @@ async def test_deadline_budget_shared_across_bases():
             "转天", bases=bm.api_bases(True, ""), deadline=0.75, timeout=0.3
         )
     assert resolution is not None and 311834 in resolution.by_subject
+
+
+@pytest.mark.asyncio
+async def test_deadline_zero_skips_all_requests():
+    """deadline=0（预算耗尽）应立即放弃，不发任何请求（而非回落默认超时）。"""
+    calls = {"n": 0}
+
+    async def counting(session, url):
+        calls["n"] += 1
+        return {}
+
+    from plugin_pkg.suwayomi import bangumi as bm
+    with patch.object(bm, "_get_json", side_effect=counting):
+        assert await bm.resolve_aliases(
+            "转天", bases=bm.api_bases(True, ""), deadline=0
+        ) is None
+    assert calls["n"] == 0
+
+
+@pytest.mark.asyncio
+async def test_deadline_caps_endpoint_wall_clock():
+    """端点内多阶段的墙钟总和不得超过其切片（详情阶段的慢滴被截断）。"""
+    import asyncio as _asyncio
+    import time as _time
+
+    async def search_ok_subjects_slow(session, url):
+        if "/search/" in url:
+            return {"list": [{"id": 311834}]}
+        await _asyncio.sleep(0.5)  # 慢滴：短于任何单请求超时，但超出端点切片
+        return {"name": "x", "name_cn": "转天"}
+
+    from plugin_pkg.suwayomi import bangumi as bm
+    with patch.object(bm, "_get_json", side_effect=search_ok_subjects_slow):
+        t0 = _time.monotonic()
+        resolution = await bm.resolve_aliases(
+            "转天", bases=[bm.OFFICIAL_API_BASE], deadline=0.25, timeout=8
+        )
+        elapsed = _time.monotonic() - t0
+    assert resolution is None
+    assert elapsed < 0.45
+
+
+@pytest.mark.asyncio
+async def test_deadline_leftover_budget_reaches_next_base():
+    """基1 慢滴烧完自己的切片后，剩余预算仍归基2 使用。"""
+    import asyncio as _asyncio
+
+    async def base1_slow(session, url):
+        await _asyncio.sleep(0.3)  # 超出其切片 0.2
+        return {}
+
+    async def base2_ok(session, url):
+        if "/search/" in url:
+            return {"list": [{"id": 42}]}
+        return {"name": "転天", "name_cn": "转天"}
+
+    async def routed(session, url):
+        return await (base1_slow if "a.example" in url else base2_ok)(session, url)
+
+    from plugin_pkg.suwayomi import bangumi as bm
+    with patch.object(bm, "_get_json", side_effect=routed):
+        resolution = await bm.resolve_aliases(
+            "转天", bases=["https://a.example", "https://b.example"],
+            deadline=0.4, timeout=8,
+        )
+    assert resolution is not None and 42 in resolution.by_subject

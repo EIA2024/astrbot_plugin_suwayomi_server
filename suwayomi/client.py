@@ -19,6 +19,11 @@ class SuwayomiError(Exception):
 
 _SOURCES_CACHE_TTL = 60
 
+# Suwayomi 会代理源站请求（fetchChapters/fetchSourceManga 等），慢源会把单个
+# GraphQL 请求拖到 aiohttp 默认的 5 分钟；无外层 wait_for 的命令路径
+# （章节/阅读/下载/更新循环）以此值为统一上界，已有更紧外层超时的路径不受影响。
+_SESSION_TIMEOUT = aiohttp.ClientTimeout(total=60, sock_connect=10)
+
 
 class SuwayomiClient:
     def __init__(self, server_url: str, auth_mode: str, username: str, password: str):
@@ -41,7 +46,7 @@ class SuwayomiClient:
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession()
+            self._session = aiohttp.ClientSession(timeout=_SESSION_TIMEOUT)
         return self._session
 
     async def close(self):
