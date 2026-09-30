@@ -47,6 +47,7 @@ from .suwayomi.service import (
     get_or_fetch_chapters,
     match_source_hint,
     normalize_zh,
+    refresh_truncated_titles,
     resolve_chapter,
     resolve_manga,
     search_best_match,
@@ -931,6 +932,10 @@ class SuwayomiPlugin(Star):
             display_limit = _bounded_int(
                 get_config_value(self.config, "search_display_limit", 20), 20, 1, 50
             )
+            refresh_on = self._config_bool(
+                get_config_value(self.config, "search_refresh_truncated_titles", True),
+                True,
+            )
 
             # 展平为 (manga, 源名)；排序开启时统一按标题相关度混排，编号在
             # 排序之后分配，保证「订阅 <编号>」与显示一致（同分保持源顺序）
@@ -940,6 +945,16 @@ class SuwayomiPlugin(Star):
                 if result
                 for m in result.mangas
             ]
+            if refresh_on and flat:
+                # 源站列表页截断的长标题（我的首推是恶役...）从详情页补全，
+                # 失败保留原标题（排序有反向包含兜底）
+                try:
+                    await refresh_truncated_titles(
+                        self.client, [m for m, _ in flat]
+                    )
+                except Exception as e:
+                    logger.warning(f"[{PLUGIN_NAME}] 截断标题刷新失败: {e}")
+
             if ranking_on:
                 flat, _scores = rank_items(
                     search_query, flat, title_of=lambda item: item[0].title

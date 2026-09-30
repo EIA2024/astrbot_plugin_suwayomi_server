@@ -14,6 +14,7 @@ from . import PLUGIN_NAME
 from .config import get_config_value
 from .client import SuwayomiError
 from .models import Chapter, Manga, Source
+from .ranking import looks_truncated
 
 if TYPE_CHECKING:
     from ..utils.subscription import SubscriptionManager
@@ -409,6 +410,37 @@ async def resolve_manga(
     except Exception as e:
         logger.error(f"[{_PLUGIN_NAME}] resolve_manga error: {e}")
         return None, "查找漫画失败。"
+
+
+async def refresh_truncated_titles(
+    client: SuwayomiClient,
+    mangas: list[Manga],
+    limit: int = 5,
+    timeout: float = 10.0,
+) -> int:
+    """并发刷新疑似被源站截断的标题（原地替换 manga.title），返回刷新成功数。
+
+    只处理以 .. / 。。 / … 结尾的标题；刷新失败或结果仍疑似截断则保留原标题，
+    后续排序走反向包含兜底。
+    """
+    targets = [m for m in mangas if looks_truncated(m.title)][: max(0, limit)]
+    if not targets:
+        return 0
+
+    async def _refresh(manga: Manga) -> bool:
+        try:
+            fresh = await asyncio.wait_for(
+                client.fetch_manga_details(manga.id), timeout
+            )
+        except Exception:
+            return False
+        if fresh and fresh.title and not looks_truncated(fresh.title):
+            manga.title = fresh.title
+            return True
+        return False
+
+    results = await asyncio.gather(*(_refresh(m) for m in targets))
+    return sum(1 for ok in results if ok)
 
 
 async def search_best_match(

@@ -54,6 +54,7 @@ _LEGACY_KEY_DEFAULTS: dict[str, Any] = {
     "default_source_id": 0,
     "search_result_ranking": True,
     "search_display_limit": 20,
+    "search_refresh_truncated_titles": True,
     "temp_dir": "",
 }
 
@@ -108,6 +109,7 @@ CONFIG_GROUPS: dict[str, list[str]] = {
         "default_source_id",
         "search_result_ranking",
         "search_display_limit",
+        "search_refresh_truncated_titles",
         "temp_dir",
     ],
 }

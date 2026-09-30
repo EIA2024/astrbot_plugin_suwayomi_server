@@ -235,6 +235,18 @@ class SuwayomiClient:
         )
         return Manga.from_dict(data["manga"])
 
+    async def fetch_manga_details(self, manga_id: int) -> Manga:
+        """Trigger a source-side refresh of manga details (updates the DB record).
+
+        搜索列表页可能返回被源站截断的标题（如「我的首推是恶役...」），
+        fetchManga 会走详情页解析器拿回完整标题后返回并持久化。
+        """
+        data = await self._raw_query(
+            'mutation($id:Int!){fetchManga(input:{id:$id}){manga{id title url sourceId status thumbnailUrl inLibrary author artist description genre}}}',
+            {"id": manga_id},
+        )
+        return Manga.from_dict(data["fetchManga"]["manga"])
+
     async def get_chapters(self, manga_id: int) -> list[Chapter]:
         data = await self._raw_query(
             'query($id:Int!){manga(id:$id){chapters{nodes{id url name chapterNumber uploadDate isDownloaded sourceOrder mangaId pageCount}}}}',

@@ -130,3 +130,28 @@ async def test_partial_source_failure_does_not_block_others():
     plugin.client.search_manga = AsyncMock(side_effect=_fake)
     results = [msg async for msg in plugin.search_manga(_event(), QUERY)]
     assert "[1] 我的首推是恶役大小姐 - 连载中（漫画社）" in results[0]
+
+
+@pytest.mark.asyncio
+async def test_truncated_title_refreshed_via_fetch_manga():
+    """截断标题经 fetchManga 补全后参与排序与显示。"""
+    plugin = _plugin()
+    _set_search(plugin, {"22": [_manga("我的首推是恶役...", 202)]})
+    plugin.client.fetch_manga_details = AsyncMock(
+        return_value=_manga("我的首推是恶役大小姐", 202)
+    )
+    results = [msg async for msg in plugin.search_manga(_event(), QUERY)]
+    text = results[0]
+    assert "我的首推是恶役大小姐" in text
+    assert "我的首推是恶役..." not in text
+    plugin.client.fetch_manga_details.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_truncated_refresh_failure_keeps_original():
+    """刷新失败时保留原标题，反向包含兜底仍排第 1。"""
+    plugin = _plugin()
+    _set_search(plugin, {"22": [_manga("我的首推是恶役...", 202)]})
+    plugin.client.fetch_manga_details = AsyncMock(side_effect=Exception("timeout"))
+    results = [msg async for msg in plugin.search_manga(_event(), QUERY)]
+    assert "[1] 我的首推是恶役... - " in results[0]

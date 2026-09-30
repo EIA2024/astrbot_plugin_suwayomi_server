@@ -207,6 +207,12 @@
         "default": true,
         "hint": "跨源混合排序：标题与关键词越相关越靠前（相等 > 包含 > 简称子序列 > 部分重叠）；同分保持源顺序。关闭后恢复按源分组的原始顺序"
       },
+      "search_refresh_truncated_titles": {
+        "description": "修复被源站截断的标题",
+        "type": "bool",
+        "default": true,
+        "hint": "搜索结果标题以 ... 结尾时（如「我的首推是恶役...」），自动从源站详情页刷新为完整标题；刷新失败保留原标题"
+      },
       "search_display_limit": {
         "description": "搜索结果显示条数",
         "type": "int",
@@ -249,5 +255,6 @@
   "default_source_id": { "type": "int", "default": 0, "invisible": true },
   "search_result_ranking": { "type": "bool", "default": true, "invisible": true },
   "search_display_limit": { "type": "int", "default": 20, "invisible": true },
+  "search_refresh_truncated_titles": { "type": "bool", "default": true, "invisible": true },
   "temp_dir": { "type": "string", "default": "", "invisible": true }
 }
