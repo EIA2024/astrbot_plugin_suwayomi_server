@@ -155,19 +155,28 @@ async def resolve_aliases(
     max_subjects: int = 5,
     timeout: float = _REQUEST_TIMEOUT,
     bases: list[str] | None = None,
+    deadline: float | None = None,
 ) -> Resolution | None:
     """解析关键词的官方条目与别名。失败返回 None（调用方静默跳过扩展）。
 
     逐个端点尝试（bases 由调用方按镜像配置生成），首个拿到条目的
     端点胜出；全部失败返回 None，等价于不使用 Bangumi。
+    deadline 为整条回退链的共享预算（秒）：逐端点均分剩余时间，
+    前一个端点提前成功则剩余时间留给后续端点——保证 hang 型故障
+    （慢挂而非快速失败）下回退链仍能在预算内走到后续端点。
     """
     query = str(query or "").strip()
     if not query:
         return None
-    for base in bases or [OFFICIAL_API_BASE]:
-        resolution = await _resolve_via(base, query, max_subjects, timeout)
+    chain = list(bases or [OFFICIAL_API_BASE])
+    remaining = deadline
+    for base in chain:
+        per_base = (remaining / len(chain)) if remaining else timeout
+        resolution = await _resolve_via(base, query, max_subjects, per_base)
         if resolution is not None and resolution.by_subject:
             return resolution
+        if remaining is not None:
+            remaining -= per_base
     return None
 
 

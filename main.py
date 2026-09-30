@@ -959,6 +959,7 @@ class SuwayomiPlugin(Star):
                     resolve_aliases(
                         search_query,
                         bases=api_bases(mirror_on, mirror_url),
+                        deadline=20,
                     )
                 ) if expand_on else None
             )

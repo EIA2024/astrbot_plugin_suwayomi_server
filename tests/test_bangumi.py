@@ -230,3 +230,38 @@ def test_alias_boost_short_alias_poisoning_blocked():
     assert alias_boost("海贼王", "斗破苍穹之王者归来", None, r) == 0.0
     # 长别名「航海王」仍是合法子串关联，但继承分封顶 949（非 1000）
     assert alias_boost("海贼王", "航海王 ONE PIECE", None, r) == 949.0
+
+
+@pytest.mark.asyncio
+async def test_deadline_budget_shared_across_bases():
+    """R5 回归：hang 型故障下回退链仍能在共享预算内走到后续端点。
+
+    基1 每请求都挂满超时（慢挂而非快败），共享预算保证基2 仍获
+    得可用时间片并成功返回。
+    """
+    import asyncio as _asyncio
+
+    async def hang_then_fail(session, url):
+        await _asyncio.sleep(0.5)  # 模拟慢挂（测试用短超时放大）
+        raise Exception("slow hang")
+
+    async def ok(session, url):
+        if "/search/" in url:
+            return {"list": [{"id": 311834}]}
+        return {"name": "転生王女と天才令嬢の魔法革命",
+                "name_cn": "转生王女与天才千金的魔法革命",
+                "infobox": [{"key": "别名", "value": [{"v": "転天"}]}]}
+
+    side = [hang_then_fail, ok]  # 基1 全部慢挂，基2 正常
+    calls = {"n": 0}
+
+    async def routed(session, url):
+        idx = 0 if "api.bangumi.vip" in url else 1
+        return await side[idx](session, url)
+
+    from plugin_pkg.suwayomi import bangumi as bm
+    with patch.object(bm, "_get_json", side_effect=routed):
+        resolution = await bm.resolve_aliases(
+            "转天", bases=bm.api_bases(True, ""), deadline=0.75, timeout=0.3
+        )
+    assert resolution is not None and 311834 in resolution.by_subject
