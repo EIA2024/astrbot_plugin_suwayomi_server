@@ -1126,7 +1126,7 @@ class SuwayomiPlugin(Star):
                 lines.append(f"\n🔍 搜索结果（{total} 条，按相关度排序）:")
                 for m, source_name, _prov in pool[:display_limit]:
                     status = STATUS_EMOJI.get(m.status, "未知")
-                    lines.append(f"  [{idx}] {m.title} - {status}（{source_name}）")
+                    lines.append(f"  [{idx}] {sanitize_for_message(m.title, limit=80)} - {status}（{source_name}）")
                     _append_row(m, source_name)
                 tail = "回复「漫画 订阅 <编号>」订阅，如「漫画 订阅 1」"
                 if idx - 1 < total:
@@ -1142,7 +1142,7 @@ class SuwayomiPlugin(Star):
                         lines.append(f"\n🔍 搜索结果（源: {source_name}）:")
                         for m in result.mangas:
                             status = STATUS_EMOJI.get(m.status, "未知")
-                            lines.append(f"  [{idx}] {m.title} - {status}")
+                            lines.append(f"  [{idx}] {sanitize_for_message(m.title, limit=80)} - {status}")
                             _append_row(m, source_name)
                 subtitle = (
                     f"{' · '.join(dict.fromkeys(n for n, r in responses if r))}"

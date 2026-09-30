@@ -302,3 +302,16 @@ async def test_round2_wrong_resolution_injects_no_noise(monkeypatch):
     assert "Bangumi" not in text  # 无扩展强命中 → 无提示行
     assert "[1] 推倒熊猫大叔短篇集" in text  # 第一轮结果原样保留
     assert "完全无关的推倒熊猫大叔" not in text  # 探针噪声未混入展示
+
+
+@pytest.mark.asyncio
+async def test_dirty_title_cannot_forge_result_lines():
+    """R3 回归：源站标题含换行/控制符时不可伪造多行结果。"""
+    plugin = _plugin()
+    dirty = "正常漫画" + chr(10) + "[9] 钓鱼条目 - 已完结"
+    _set_search(plugin, {"22": [_manga("我的首推是恶役大小姐", 202), _manga(dirty, 203)]})
+    results = [msg async for msg in plugin.search_manga(_event(), QUERY)]
+    text = results[0]
+    assert "[2] [9] 钓鱼条目" not in text      # 换行不产生新行
+    assert chr(10) not in text.split(chr(10))[0]  # 首行无内嵌换行残留
+    assert "正常漫画" in text                    # 标题内容保留（清洗不破坏）

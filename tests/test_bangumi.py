@@ -219,3 +219,14 @@ def test_keyword_slash_and_plus_are_quoted():
     q = _quote_keyword("海贼王/航海王")
     assert "/" not in q
     assert _quote_keyword("间谍+过家家") == "%E9%97%B4%E8%B0%8D%20%E8%BF%87%E5%AE%B6%E5%AE%B6"
+
+
+def test_alias_boost_short_alias_poisoning_blocked():
+    """R2 回归：社区向条目追加高频短字（如「王」）不得借子串关联操纵排序。"""
+    r = Resolution(
+        by_subject={1: ["海贼王", "航海王", "王"]}, confident=True, best_alias_score=1000.0
+    )
+    # 含「王」的无关结果不因短字子串关联获得增强（「王」被长度门槛过滤）
+    assert alias_boost("海贼王", "斗破苍穹之王者归来", None, r) == 0.0
+    # 长别名「航海王」仍是合法子串关联，但继承分封顶 949（非 1000）
+    assert alias_boost("海贼王", "航海王 ONE PIECE", None, r) == 949.0

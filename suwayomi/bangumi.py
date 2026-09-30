@@ -268,11 +268,16 @@ def build_probes(
     return [(name, sid) for _, name, sid in candidates[:max_probes]]
 
 
-# 溯源增强的保守校准：探针捞回的结果不能仅凭溯源继承条目最强别名分
-# ——否则泛探针在源站模糊搜回的噪声会整体抬到 top-N。规则：
-# ① 结果标题包含条目某别名（归一化子串）→ 全额继承（官方别名等价）；
-# ② 仅溯源关联 → 结果自身对 query 的分数需 ≥ _PROVENANCE_BASE_FLOOR，
-#    且增强分封顶 _PROVENANCE_BOOST_CAP（略低于强命中线，噪声无法独自过线）。
+# 别名增强的保守校准。bgm.tv 的别名是社区 wiki（注册用户可编辑），
+# 高频短字（如单字「王」）一旦被追加进条目别名，任何标题含该字的
+# 结果都会命中子串关联——故两条路径都设门槛：
+# ① 结果标题包含条目某别名（归一化子串）→ 别名须 ≥ _ALIAS_MIN_LEN 字
+#    （防短字投毒），继承分封顶 _ALIAS_BOOST_CAP（略低于完全相等）；
+# ② 仅溯源关联（探针捞回）→ 结果自身对 query 的分数需 ≥
+#    _PROVENANCE_BASE_FLOOR，且增强分封顶 _PROVENANCE_BOOST_CAP
+#    （低于强命中线，噪声无法独自过线）。
+_ALIAS_MIN_LEN = 3
+_ALIAS_BOOST_CAP = 949.0
 _PROVENANCE_BASE_FLOOR = 650.0
 _PROVENANCE_BOOST_CAP = 849.0
 
@@ -298,9 +303,14 @@ def alias_boost(
         return 0.0
     best = 0.0
     for sid, names in resolution.by_subject.items():
+        # 只认可信长度的别名做子串关联（防社区别名表投毒高频短字）
+        long_aliases = [
+            a for a in names
+            if len(normalize_for_rank(a)) >= _ALIAS_MIN_LEN
+        ]
         alias_linked = any(
             (alias_norm := normalize_for_rank(alias)) and alias_norm in title_norm
-            for alias in names
+            for alias in long_aliases
         )
         from_probe = provenance_sid == sid
         if not alias_linked and not from_probe:
@@ -317,7 +327,14 @@ def alias_boost(
                 ),
             )
         else:
-            best = max(best, max(score_title(query, alias) for alias in names))
+            # 子串关联：继承分封顶（防「query==别名」1000 分直接置顶）
+            best = max(
+                best,
+                min(
+                    max(score_title(query, alias) for alias in names),
+                    _ALIAS_BOOST_CAP,
+                ),
+            )
     return best
 
 

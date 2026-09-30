@@ -44,6 +44,8 @@ main.py (SuwayomiPlugin — thin dispatch layer)
   ├── suwayomi/config.py (grouped config schema + legacy flat migration helpers)
   ├── suwayomi/models.py (Source, Manga, Chapter, SearchResult dataclasses)
   ├── suwayomi/service.py (resolve_manga, resolve_chapter, get_or_fetch_chapters, fmt helpers)
+  ├── suwayomi/ranking.py (pure search-result scoring: normalize + 5-tier evidence + stable rank; shared by command/AI/batch paths)
+  ├── suwayomi/bangumi.py (bgm.tv alias resolution for search expansion: top-5 subjects + JP-variant retry + probe builder + alias-boost arbiter + mirror fallback chain)
   ├── suwayomi/cards.py (T2I card template, data prep, embed_covers, render_card, CardCache)
   ├── suwayomi/t2i.py (standalone astrbot-t2i-service client for t2i_source=custom)
   ├── suwayomi/ai_service.py (structured, side-effect-free Agent search/chapter/subscription service)
@@ -127,7 +129,7 @@ main.py (SuwayomiPlugin — thin dispatch layer)
 - `_download_one(session, url, dest)` — Single image download with exponential backoff retry.
 - `_push_chapter_images(umo, title, chapter)` — Push chapter as images (reuses read send logic, respects `send_mode` for forward mode). Used by auto-push. Chapter label uses `ch.name` automatically.
 - `_push_chapter_file(umo, title, chapter)` — Push chapter as packaged file (reuses download logic). Used by auto-push. Chapter label uses `ch.name` automatically.
-- `_search_best_match(name, source_filter)` — Search manga name across sources, return first match. Used by batch subscribe.
+- `search_best_match(client, config, name, source_filter)` — Search manga name across sources, return the best relevance match within the first source that has results. Used by batch subscribe.
 - `_prepare_chapter_delivery(event, chapter)` — Build the chapter image result for `/漫画 阅读` and explicitly requested AI image sending. Returns `(result, total_pages, delivered_pages, tmp_dir)`. Returns `None` as result when all images fail to download (e.g. auth misconfiguration), so callers can surface a meaningful error.
 - `_prepare_chapter_file_delivery(event, manga, chapter, fmt)` — Download all pages and build the AI Tool's PDF-default file result (PDF/ZIP/CBZ).
 - AI tools keep recent chapter candidates isolated by `(unified_msg_origin, sender_id)` for 10 minutes. The send tool only accepts a previously exposed `(manga_id, chapter_id)` pair, defaults to PDF unless the user names another supported format. The `asyncio.Lock` per scope prevents concurrent sends; failed sends can be retried.

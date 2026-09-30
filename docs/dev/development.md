@@ -43,6 +43,9 @@ astrbot_suwayomi_server/
 │   ├── test_client.py         # 客户端单元测试（mocked HTTP）
 │   ├── test_downloader.py     # 图片下载/封面下载单元测试
 │   ├── test_subscription.py   # 订阅管理单元测试
+│   ├── test_ranking.py        # 搜索相关度打分器单元测试
+│   ├── test_bangumi.py        # Bangumi 别名解析单元测试
+│   ├── test_search_ranking.py # 搜索排序/合并/扩展命令级测试
 │   ├── test_web_api.py        # WebUI API handler 单元测试
 │   ├── test_batch_subscribe.py # 批量订阅参数解析单元测试
 │   ├── test_push.py           # 自动推送单元测试
@@ -134,6 +137,14 @@ astrbot_suwayomi_server/
 - `get_config_value(config, key, default)` — 读取（分组优先，回退旧版平铺键）；`set_config_value(config, key, value)` — 写入分组（旧平铺键仅在值为非默认时清理，默认占位键保留避免 Core 补键日志）；`flatten_config(config, keys)` — WebUI API 平铺展开
 - `migrate_legacy_config(config)` — 插件每次加载在 `__init__` 中调用，无状态幂等：非默认值的平铺键（升级残留或手改）同步进分组并清理，等于 `_LEGACY_KEY_DEFAULTS` 的占位键（Core 补回的无意义默认值）原样保留、永不覆盖分组；无变更时不触发保存
 - `_conf_schema.json` 保留全部旧键为 `invisible: true`，使 AstrBot Core 的配置同步不会删除用户旧值；`test_legacy_defaults_match_schema` 双向校验 schema 与代码定义一致
+
+#### `suwayomi/ranking.py` — 搜索结果相关度打分器
+
+纯函数模块：归一化（NFKC/大小写/繁简/日文字形/标点）+ 五级证据打分（相等/包含/反向包含/子序列/部分重叠）+ 稳定排序。命令、AI 工具与批量订阅三条路径共用。
+
+#### `suwayomi/bangumi.py` — Bangumi 别名解析与镜像回退
+
+bgm.tv 模糊搜索解析官方译名/别名（top-5 条目 + 日文字形变体重试），构建探针供搜索命令无强命中时重搜；`bangumi_mirror` 开启时按「自定义镜像 → 内置公共镜像」回退。
 
 #### `suwayomi/service.py` — 业务逻辑层
 
@@ -376,7 +387,7 @@ uv add --dev pytest pytest-asyncio
 
 ```bash
 # 全部单元测试（无需网络）
-uv run pytest tests/test_pack.py tests/test_models.py tests/test_client.py tests/test_downloader.py tests/test_list_chapters.py tests/test_cards.py tests/test_card_commands.py tests/test_subscription.py tests/test_web_api.py tests/test_batch_subscribe.py tests/test_push.py tests/test_service.py tests/test_updater.py tests/test_ai_service.py tests/test_ai_tools.py tests/test_live_skip.py tests/test_t2i.py tests/test_config.py -v
+uv run pytest tests/test_pack.py tests/test_models.py tests/test_client.py tests/test_downloader.py tests/test_list_chapters.py tests/test_cards.py tests/test_card_commands.py tests/test_subscription.py tests/test_web_api.py tests/test_batch_subscribe.py tests/test_push.py tests/test_service.py tests/test_updater.py tests/test_ai_service.py tests/test_ai_tools.py tests/test_live_skip.py tests/test_t2i.py tests/test_config.py tests/test_ranking.py tests/test_bangumi.py tests/test_search_ranking.py -v
 
 # 实时 API 集成测试（需要 Suwayomi-Server 可访问）
 uv run pytest tests/test_live_api.py tests/test_live_web_api.py -v -s
