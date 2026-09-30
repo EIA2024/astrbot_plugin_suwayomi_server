@@ -37,6 +37,7 @@ from .suwayomi.client import SuwayomiClient, SuwayomiError
 from .suwayomi.config import get_config_value, migrate_legacy_config
 from .suwayomi.bangumi import (
     alias_boost,
+    api_bases,
     build_probes,
     confident_aliases,
     resolve_aliases,
@@ -935,6 +936,12 @@ class SuwayomiPlugin(Star):
             expand_on = ranking_on and self._config_bool(
                 get_config_value(self.config, "search_alias_expansion", True), True
             )
+            mirror_on = self._config_bool(
+                get_config_value(self.config, "bangumi_mirror", False), False
+            )
+            mirror_url = str(
+                get_config_value(self.config, "bangumi_mirror_url", "") or ""
+            ).strip()
 
             async def _search_source(src):
                 try:
@@ -948,7 +955,12 @@ class SuwayomiPlugin(Star):
 
             # Bangumi 别名解析与源搜索并行执行，互不等待
             resolve_task = (
-                asyncio.create_task(resolve_aliases(search_query)) if expand_on else None
+                asyncio.create_task(
+                    resolve_aliases(
+                        search_query,
+                        bases=api_bases(mirror_on, mirror_url),
+                    )
+                ) if expand_on else None
             )
             # 并发请求全部源（与 AI 工具路径一致），单源 15s 超时；
             # 失败源记为 None，不阻塞其它源的结果

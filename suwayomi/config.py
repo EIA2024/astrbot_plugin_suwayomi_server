@@ -56,6 +56,8 @@ _LEGACY_KEY_DEFAULTS: dict[str, Any] = {
     "search_display_limit": 20,
     "search_refresh_truncated_titles": True,
     "search_alias_expansion": True,
+    "bangumi_mirror": False,
+    "bangumi_mirror_url": "",
     "temp_dir": "",
 }
 
@@ -112,6 +114,8 @@ CONFIG_GROUPS: dict[str, list[str]] = {
         "search_display_limit",
         "search_refresh_truncated_titles",
         "search_alias_expansion",
+        "bangumi_mirror",
+        "bangumi_mirror_url",
         "temp_dir",
     ],
 }

@@ -207,6 +207,18 @@
         "default": true,
         "hint": "跨源混合排序：标题与关键词越相关越靠前（相等 > 包含 > 简称子序列 > 部分重叠）；同分保持源顺序。关闭后恢复按源分组的原始顺序"
       },
+      "bangumi_mirror": {
+        "description": "Bangumi 公共镜像回退",
+        "type": "bool",
+        "default": false,
+        "hint": "网络受限环境（api.bgm.tv 无法直连）时启用：优先用下方自定义镜像，未填则按序尝试内置公共镜像（api.bangumi.vip / bgmapi.anibt.net，社区运营、可能轮换下线）；全部失败自动回退为不使用别名扩展。关闭时仅直连官方 api.bgm.tv"
+      },
+      "bangumi_mirror_url": {
+        "description": "自定义 Bangumi API 镜像地址",
+        "type": "string",
+        "default": "",
+        "hint": "留空使用内置公共镜像。填写 API 根地址即可（如 https://bgmapi.anibt.net），搜索关键词将经该镜像转发，请自行评估镜像运营方的可信度"
+      },
       "search_alias_expansion": {
         "description": "Bangumi 别名扩展搜索",
         "type": "bool",
@@ -263,5 +275,7 @@
   "search_display_limit": { "type": "int", "default": 20, "invisible": true },
   "search_refresh_truncated_titles": { "type": "bool", "default": true, "invisible": true },
   "search_alias_expansion": { "type": "bool", "default": true, "invisible": true },
+  "bangumi_mirror": { "type": "bool", "default": false, "invisible": true },
+  "bangumi_mirror_url": { "type": "string", "default": "", "invisible": true },
   "temp_dir": { "type": "string", "default": "", "invisible": true }
 }

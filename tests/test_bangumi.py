@@ -169,3 +169,53 @@ def test_sanitize_for_message_strips_injection():
     assert nl not in out and tab not in out and rtl not in out
     assert out == "正常别名 回复「漫画 订阅 9」"
     assert len(sanitize_for_message("超长" * 100)) == 50
+
+
+def test_api_bases_priority_chain():
+    from plugin_pkg.suwayomi.bangumi import (
+        BUILTIN_MIRROR_BASES, OFFICIAL_API_BASE, api_bases,
+    )
+    assert api_bases(False, "") == [OFFICIAL_API_BASE]
+    assert api_bases(False, "https://x.example") == [OFFICIAL_API_BASE]
+    assert api_bases(True, "https://my.mirror/") == ["https://my.mirror"]
+    assert api_bases(True, "") == BUILTIN_MIRROR_BASES
+
+
+@pytest.mark.asyncio
+async def test_resolve_falls_back_to_next_base():
+    """第一个端点网络失败 → 自动尝试第二个内置镜像。"""
+    calls = []
+
+    async def fake_get_json(session, url):
+        calls.append(url)
+        if "api.bangumi.vip" in url and "/search/" in url:
+            raise Exception("mirror1 down")
+        if "/search/" in url:
+            return {"list": [{"id": 311834}]}
+        return {"name": "転生王女と天才令嬢の魔法革命", "name_cn": "转生王女与天才千金的魔法革命",
+                "infobox": [{"key": "别名", "value": [{"v": "転天"}]}]}
+
+    from plugin_pkg.suwayomi import bangumi as bm
+    with patch.object(bm, "_get_json", side_effect=fake_get_json):
+        resolution = await bm.resolve_aliases(
+            "转天", bases=bm.api_bases(True, "")
+        )
+    assert resolution is not None and 311834 in resolution.by_subject
+    searched = [u for u in calls if "/search/" in u]
+    assert any("api.bangumi.vip" in u for u in searched)
+    assert any("bgmapi.anibt.net" in u for u in searched)
+
+
+@pytest.mark.asyncio
+async def test_resolve_all_bases_down_returns_none():
+    from plugin_pkg.suwayomi import bangumi as bm
+    with patch.object(bm, "_get_json", AsyncMock(side_effect=Exception("all down"))):
+        assert await bm.resolve_aliases("转天", bases=bm.api_bases(True, "")) is None
+
+
+def test_keyword_slash_and_plus_are_quoted():
+    """含 / 与 + 的关键词不再破坏 URL 路径。"""
+    from plugin_pkg.suwayomi.bangumi import _quote_keyword
+    q = _quote_keyword("海贼王/航海王")
+    assert "/" not in q
+    assert _quote_keyword("间谍+过家家") == "%E9%97%B4%E8%B0%8D%20%E8%BF%87%E5%AE%B6%E5%AE%B6"

@@ -29,6 +29,9 @@ from .ranking import (
 )
 
 OFFICIAL_API_BASE = "https://api.bgm.tv"
+# 社区公共镜像（bangumi.vip 为 Mirrox 全域镜像、anibt.net 为 nginx API 反代；
+# 2026-09 实测可用。公共镜像存在域名轮换/下线风险，仅作受限网络的回退链）。
+BUILTIN_MIRROR_BASES = ["https://api.bangumi.vip", "https://bgmapi.anibt.net"]
 
 _SEARCH_PATH = "/search/subject/{kw}?type=1&max_results=8"
 _SUBJECT_PATH = "/v0/subjects/{sid}"
@@ -112,6 +115,22 @@ def confident_aliases(query: str, resolution: Resolution) -> list[str]:
     return out[:3]
 
 
+def api_bases(mirror_enabled: bool, mirror_url: str) -> list[str]:
+    """Bangumi API 端点优先级（回退链）。
+
+    - 镜像开关关闭：仅官方 api.bgm.tv（网络受限时解析失败 → 扩展静默跳过）
+    - 镜像开关开启且填了自定义地址：只用用户提供的镜像
+    - 镜像开关开启且未填：内置公共镜像按序回退
+    全部失败时 resolve_aliases 返回 None，等价于不使用 Bangumi。
+    """
+    if not mirror_enabled:
+        return [OFFICIAL_API_BASE]
+    custom = (mirror_url or "").strip().rstrip("/")
+    if custom:
+        return [custom]
+    return list(BUILTIN_MIRROR_BASES)
+
+
 def _quote_keyword(keyword: str) -> str:
     # safe="" 防路径段注入（关键词含 / 时不再拼出多段路径，如
     # 「海贼王/航海王」这类输入曾导致请求落到错误路径而静默失败）；
@@ -129,12 +148,21 @@ async def resolve_aliases(
     query: str,
     max_subjects: int = 5,
     timeout: float = _REQUEST_TIMEOUT,
+    bases: list[str] | None = None,
 ) -> Resolution | None:
-    """解析关键词的官方条目与别名。失败返回 None（调用方静默跳过扩展）。"""
+    """解析关键词的官方条目与别名。失败返回 None（调用方静默跳过扩展）。
+
+    逐个端点尝试（bases 由调用方按镜像配置生成），首个拿到条目的
+    端点胜出；全部失败返回 None，等价于不使用 Bangumi。
+    """
     query = str(query or "").strip()
     if not query:
         return None
-    return await _resolve_via(OFFICIAL_API_BASE, query, max_subjects, timeout)
+    for base in bases or [OFFICIAL_API_BASE]:
+        resolution = await _resolve_via(base, query, max_subjects, timeout)
+        if resolution is not None and resolution.by_subject:
+            return resolution
+    return None
 
 
 async def _resolve_via(
