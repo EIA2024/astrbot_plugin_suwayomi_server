@@ -113,3 +113,20 @@ async def test_zero_results():
     _set_search(plugin, {"11": [], "22": []})
     results = [msg async for msg in plugin.search_manga(_event(), QUERY)]
     assert "未找到相关漫画" in results[0]
+
+
+@pytest.mark.asyncio
+async def test_partial_source_failure_does_not_block_others():
+    """单个源抛异常时，其余源的结果正常展示（并发收集互不阻塞）。"""
+    plugin = _plugin()
+
+    async def _fake(src_id, query, page=1):
+        if str(src_id) == "11":
+            raise Exception("connection reset")
+        return SearchResult(mangas=[_manga("我的首推是恶役大小姐", 202)],
+                            has_next_page=False)
+
+    plugin.client.get_sources = AsyncMock(return_value=_sources())
+    plugin.client.search_manga = AsyncMock(side_effect=_fake)
+    results = [msg async for msg in plugin.search_manga(_event(), QUERY)]
+    assert "[1] 我的首推是恶役大小姐 - 连载中（漫画社）" in results[0]

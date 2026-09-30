@@ -35,7 +35,7 @@ from .suwayomi.cards import (
 )
 from .suwayomi.client import SuwayomiClient, SuwayomiError
 from .suwayomi.config import get_config_value, migrate_legacy_config
-from .suwayomi.models import Manga, SearchResult
+from .suwayomi.models import Manga
 from .suwayomi.ranking import rank_items
 from .suwayomi.service import (
     STATUS_EMOJI,
@@ -909,13 +909,21 @@ class SuwayomiPlugin(Star):
                     max_sources=5,
                 )
 
-            all_results: list[tuple[str, SearchResult]] = []
-            for src in target_sources:
+            async def _search_source(src):
                 try:
-                    result = await self.client.search_manga(src.id, search_query)
-                    all_results.append((src.display_name, result))
+                    result = await asyncio.wait_for(
+                        self.client.search_manga(src.id, search_query), timeout=15
+                    )
+                    return src.display_name, result
                 except Exception as e:
                     logger.warning(f"[{PLUGIN_NAME}] 搜索源 {src.name} 失败: {e}")
+                    return src.display_name, None
+
+            # 并发请求全部源（与 AI 工具路径一致），单源 15s 超时；
+            # 失败源记为 None，不阻塞其它源的结果
+            responses = await asyncio.gather(
+                *(_search_source(src) for src in target_sources)
+            )
 
             ranking_on = self._config_bool(
                 get_config_value(self.config, "search_result_ranking", True), True
@@ -928,7 +936,8 @@ class SuwayomiPlugin(Star):
             # 排序之后分配，保证「订阅 <编号>」与显示一致（同分保持源顺序）
             flat: list[tuple[Manga, str]] = [
                 (m, source_name)
-                for source_name, result in all_results
+                for source_name, result in responses
+                if result
                 for m in result.mangas
             ]
             if ranking_on:
@@ -970,7 +979,7 @@ class SuwayomiPlugin(Star):
                 subtitle = f"按相关度排序 · {total} 条"
             else:
                 # 关闭排序：保持旧版按源分组的输出格式
-                for source_name, result in all_results:
+                for source_name, result in responses:
                     if result and result.mangas:
                         lines.append(f"\n🔍 搜索结果（源: {source_name}）:")
                         for m in result.mangas:
@@ -978,7 +987,7 @@ class SuwayomiPlugin(Star):
                             lines.append(f"  [{idx}] {m.title} - {status}")
                             _append_row(m, source_name)
                 subtitle = (
-                    f"{' · '.join(dict.fromkeys(n for n, r in all_results if r))}"
+                    f"{' · '.join(dict.fromkeys(n for n, r in responses if r))}"
                     f" · {len(card_rows)} 条"
                 )
 
