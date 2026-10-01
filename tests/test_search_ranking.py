@@ -108,6 +108,21 @@ async def test_ranking_disabled_keeps_legacy_grouped_format():
     assert "搜索结果（源: 漫画社）" in text
     assert "按相关度" not in text
     assert text.index("源: 动漫屋") < text.index("源: 漫画社")
+    # 旧版末尾的订阅提示行必须保留（PR #21 评审：关闭开关应完整恢复旧格式）
+    assert "回复「漫画 订阅 <编号>」订阅" in text
+
+
+@pytest.mark.asyncio
+async def test_ranking_disabled_skips_truncated_title_refresh():
+    """关闭排序时截断标题刷新同样关闭（完整恢复旧版行为）。"""
+    plugin = _plugin(search_result_ranking=False)
+    _set_search(plugin, {"11": [_manga("我的首推是恶役...", 101)]})
+    plugin.client.fetch_manga_details = AsyncMock(
+        return_value=_manga("我的首推是恶役大小姐", 101)
+    )
+    results = [msg async for msg in plugin.search_manga(_event(), QUERY)]
+    assert "我的首推是恶役..." in results[0]
+    plugin.client.fetch_manga_details.assert_not_called()
 
 
 @pytest.mark.asyncio

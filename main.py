@@ -936,7 +936,9 @@ class SuwayomiPlugin(Star):
             display_limit = _bounded_int(
                 get_config_value(self.config, "search_display_limit", 20), 20, 1, 50
             )
-            refresh_on = self._config_bool(
+            # 截断刷新依赖排序开启：关闭 search_result_ranking 时须完整
+            # 恢复旧版行为（不刷新、按源分组原样输出）
+            refresh_on = ranking_on and self._config_bool(
                 get_config_value(self.config, "search_refresh_truncated_titles", True),
                 True,
             )
@@ -1153,6 +1155,8 @@ class SuwayomiPlugin(Star):
                             status = STATUS_EMOJI.get(m.status, "未知")
                             lines.append(f"  [{idx}] {sanitize_for_message(m.title, limit=80)} - {status}")
                             _append_row(m, source_name)
+                # 旧版末尾的订阅提示行（关闭排序 = 完整恢复旧版输出）
+                lines.append("\n回复「漫画 订阅 <编号>」订阅，如「漫画 订阅 1」")
                 subtitle = (
                     f"{' · '.join(dict.fromkeys(n for n, r in responses if r))}"
                     f" · {len(card_rows)} 条"
