@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 
 ### Added
 
-- **搜索结果跨源相关度排序** — 新增 `suwayomi/ranking.py` 纯函数打分器：归一化（NFKC/大小写/繁简/日文新字体/标点）后按五级证据打分（完全相等 1000 > 正向包含 900 > 反向包含 880 > 子序列简称 800–860（fzf 式紧凑度）> 部分重叠 ≤800），同分稳定保序。`/漫画 搜索` 输出改为混排列表（行内标注源名），编号在排序后分配，`订阅 <编号>` 映射保持一致；AI 搜索工具与批量订阅选书（`search_best_match` 源内选优）共用同一打分器。配置 `search_result_ranking`（默认开，关闭恢复按源分组旧格式）与 `search_display_limit`（默认 20）
+- **搜索结果跨源相关度排序** — 新增 `suwayomi/ranking.py` 纯函数打分器：归一化（NFKC/大小写/繁简/日文新字体/标点；日文字形经 opencc 自带 JPVariants.txt 动态构建全量映射，字典缺失时回落内置小表）后按五级证据打分（完全相等 1000 > 正向包含 900 > 反向包含 880 > 子序列简称 800–860（fzf 式紧凑度）> 部分重叠 ≤800），同分稳定保序。`/漫画 搜索` 输出改为混排列表（行内标注源名），编号在排序后分配，`订阅 <编号>` 映射保持一致；AI 搜索工具与批量订阅选书（`search_best_match` 源内选优）共用同一打分器。配置 `search_result_ranking`（默认开，关闭恢复按源分组旧格式）与 `search_display_limit`（默认 20）
 - **修复被源站截断的搜索标题** — 列表页截断标题（如「我的首推是恶役...」）经 GraphQL `fetchManga` 并发刷新为完整标题（上限 5 条/10s 超时，失败保留原标题走反向包含兜底排序）。配置 `search_refresh_truncated_titles`
 - **Bangumi 别名扩展搜索** — 关键词无强命中时（简称「我推恶役」、跨译名「海贼王/航海王」）通过 api.bgm.tv 解析官方译名/别名（top-5 条目 + 日文字形变体重试），别名探针有界 fan-out 重搜；扩展结果需强命中才并入展示并附透明提示行，别名增强仲裁对第一轮同样生效。配置 `search_alias_expansion`（默认开，失败静默跳过）
 - **Bangumi 公共镜像回退链** — 网络受限环境可选 `bangumi_mirror`：自定义镜像 → 内置公共镜像（api.bangumi.vip / bgmapi.anibt.net）→ 回退不使用 Bangumi；关闭时直连官方
@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 
 ### Fixed
 
+- 日文新字体归一化覆盖不全：内置小映射表未收录的常用字（如「戦争」的 戦）归一化后不等于对应简体词，改用 opencc 自带 JPVariants.txt（365 组繁→日变体）运行时动态构建全量映射，内置表降级为补漏与回落
 - 别名解析整体超时兜底：subject 详情并发拉取 + 调用侧 20s `wait_for`，端点回退最坏等待不再拖住命令
 - 溯源增强门槛收紧：探针结果仅凭溯源不再继承最强别名分（标题含官方别名才全额；仅溯源时要求自身 ≥650 分且封顶 849），泛探针噪声无法挤入 top-N
 - 第三方文本进入消息前剥离换行与控制符并限长：Bangumi 别名/探针名（扩展提示行）与搜索结果行中的源站标题

@@ -5,16 +5,18 @@
 - A  完全相等          归一化后一字不差                        1000
 - B  正向包含          完整关键词是标题的子串                  900 − 额外长度×2 − 位置惩罚
 - B  多词项包含        按 空格/'+' 切词后每个词都出现在标题里  895 − 额外长度×2
-- B' 反向包含          标题是关键词的子串且覆盖关键词 ≥50%     880 − 缺失长度×3
+- B' 反向包含          标题是关键词的子串且覆盖关键词 ≥60%     880 − 缺失长度×3
 - B'' 子序列(fzf 式)   关键词各字符按序出现、允许间隔          800 + 60×紧凑度
 - C  部分重叠          字符覆盖率 + 序列相似度 + 词项命中率    ≤800
 
 同分保持原顺序（稳定排序）：打分失误时行为退化为现状，不会更糟。
 
-归一化链：NFKC → casefold → 繁转简(opencc t2s) → 日文新字体转简体(内置映射)
-→ 去空白/'+'/连接符/标点。日文映射只覆盖与简体字形不同的常用新字体
-（転→转、 変→变 …）；插件依赖的 opencc-python-reimplemented 不带 t2jp/jp2t
-配置，此处用小映射表替代，未覆盖字符原样保留（优雅退化）。
+归一化链：NFKC → casefold → 日文新字体转繁体（opencc 自带
+JPVariants.txt 动态构建）→ 繁转简(t2s) → 内置小表补漏 → 去空白/
+'+'/连接符/标点。插件依赖 opencc-python-reimplemented 不带 jp2t
+配置文件，故运行时直接解析其 dictionary/JPVariants.txt（繁→日变体，
+逐行 `繁\\t日1 日2`）反向构建 日→繁 全量映射（367 组）；字典缺失或
+解析失败时整体回落下方内置小映射表（优雅退化，未覆盖字符原样保留）。
 """
 from __future__ import annotations
 
@@ -22,6 +24,7 @@ import re
 import unicodedata
 from difflib import SequenceMatcher
 from functools import lru_cache
+from importlib import resources
 
 import opencc
 
@@ -29,8 +32,50 @@ STRONG_MATCH_THRESHOLD = 800.0
 
 _t2s = opencc.OpenCC("t2s")
 
-# 日文新字体 → 简体（仅收录与简体字形不同的常用字；繁体字由 t2s 处理）
-_JP_TO_CN = str.maketrans({
+
+def _load_jp_variant_tables() -> tuple[dict[str, str], dict[str, str], opencc.OpenCC] | None:
+    """解析 opencc 自带 JPVariants.txt，构建 日→繁 / 繁→日 映射与 s2t 转换器。
+
+    返回 None 表示任一环节失败（包结构变化/字典缺失/s2t 配置缺失），
+    调用方整体回落内置小映射表。
+    """
+    try:
+        raw = (resources.files("opencc") / "dictionary" / "JPVariants.txt").read_text(
+            encoding="utf-8"
+        )
+        jp_to_trad: dict[str, str] = {}
+        trad_to_jp: dict[str, str] = {}
+        for line in raw.splitlines():
+            if not line.strip():
+                continue
+            parts = line.split("\t")
+            if len(parts) != 2:
+                continue
+            trad = parts[0].strip()
+            variants = parts[1].split()
+            if not trad or not variants:
+                continue
+            jp_to_trad.setdefault(variants[0], trad)
+            trad_to_jp.setdefault(trad, variants[0])
+        if not jp_to_trad:
+            return None
+        return jp_to_trad, trad_to_jp, opencc.OpenCC("s2t")
+    except Exception:
+        return None
+
+
+_JP_TABLES = _load_jp_variant_tables()
+# 全量 日→繁 字符对（JPVariants 反向）；None = 回落内置小表
+_JP_TO_TRAD_RAW: dict[str, str] | None = _JP_TABLES[0] if _JP_TABLES else None
+# 繁→日 正向字符对（取首变体），仅用于构造 Bangumi 日文重试查询
+_TRAD_TO_JP_RAW: dict[str, str] | None = _JP_TABLES[1] if _JP_TABLES else None
+_s2t: opencc.OpenCC | None = _JP_TABLES[2] if _JP_TABLES else None
+_JP_TO_TRAD = str.maketrans(_JP_TO_TRAD_RAW) if _JP_TO_TRAD_RAW is not None else None
+_TRAD_TO_JP = str.maketrans(_TRAD_TO_JP_RAW) if _TRAD_TO_JP_RAW is not None else None
+
+# 日文新字体 → 简体（仅收录与简体字形不同的常用字；繁体字由 t2s 处理）。
+# JPVariants.txt 可用时仅作补漏（覆盖其未收录的键），不可用时整体回落
+_JP_TO_CN_RAW = {
     "転": "转", "売": "卖", "対": "对", "変": "变", "実": "实", "経": "经",
     "楽": "乐", "価": "价", "満": "满", "関": "关", "説": "说", "読": "读",
     "続": "续", "勧": "劝", "弾": "弹", "撃": "击", "沢": "泽", "滝": "泷",
@@ -52,10 +97,15 @@ _JP_TO_CN = str.maketrans({
     "顔": "颜", "餓": "饿", "馬": "马", "駆": "驱", "騎": "骑", "黒": "黑",
     "黙": "默", "窓": "窗", "渋": "涩", "縁": "缘",
     "芸": "艺", "錬": "炼", "斎": "斋", "嶋": "岛", "嬢": "娘",
-})
+}
+_JP_TO_CN = str.maketrans(_JP_TO_CN_RAW)
+# JPVariants 已覆盖的键不再重复映射；未覆盖的键由小表补漏
+_JP_EXTRA_TO_CN = str.maketrans(
+    {k: v for k, v in _JP_TO_CN_RAW.items() if k not in (_JP_TO_TRAD_RAW or {})}
+)
 # 反向表（仅用于构造 Bangumi 日文重试查询；当前映射无重复目标字，若未来
 # 加入碰撞对，此处 dict 推导会保留最后一个键——加键时需自行核对唯一性）
-_CN_TO_JP = str.maketrans({v: k for k, v in _JP_TO_CN.items()})
+_CN_TO_JP = str.maketrans({v: k for k, v in _JP_TO_CN_RAW.items()})
 
 _STRIP_RE = re.compile(
     r"[\s\.\。·・\-—_~～！？!?:：;；'‘’\"“”「」『』（）()【】\[\]《》<>×*+/\\|,，、]+"
@@ -67,8 +117,14 @@ _TRUNCATED_RE = re.compile(r"(?:\.{2,}|。{2,}|…)$")
 def _normalize_cached(text: str) -> str:
     text = unicodedata.normalize("NFKC", text)
     text = text.casefold()
-    text = _t2s.convert(text)
-    text = text.translate(_JP_TO_CN)
+    if _JP_TO_TRAD is not None:
+        # JPVariants 全量：日文新字体 → 繁体，再统一繁转简
+        text = _t2s.convert(text.translate(_JP_TO_TRAD))
+        # 字典未收录的日文新字体由内置小表直转简体补漏
+        text = text.translate(_JP_EXTRA_TO_CN)
+    else:
+        text = _t2s.convert(text)
+        text = text.translate(_JP_TO_CN)
     return _STRIP_RE.sub("", text)
 
 
@@ -79,7 +135,12 @@ def normalize_for_rank(text: str) -> str:
 
 def jp_variant(text: str) -> str | None:
     """把简体关键词转成日文新字体写法（用于 Bangumi 重试）；无差异时返回 None。"""
-    converted = _t2s.convert(str(text or "")).translate(_CN_TO_JP)
+    t = str(text or "")
+    if _TRAD_TO_JP is not None and _s2t is not None:
+        # 简 → 繁(s2t) → JPVariants 正向取日文首变体
+        converted = _s2t.convert(t).translate(_TRAD_TO_JP)
+    else:
+        converted = _t2s.convert(t).translate(_CN_TO_JP)
     return converted or None
 
 

@@ -119,3 +119,31 @@ def test_looks_truncated():
 def test_jp_variant():
     assert jp_variant("转天") == "転天"
     assert jp_variant("我的首推") == "我的首推"  # 无差异字符时原样返回
+
+
+def test_jp_variants_dictionary_covers_builtin_misses():
+    """PR #21 评审：opencc JPVariants.txt 动态构建补全内置小表缺口。
+
+    「戦争」此前归一化后仍不等于「战争」（戦 不在内置表中），
+    动态表覆盖全部 365 组繁→日变体后应满分相等。
+    """
+    assert score_title("战争", "戦争") == 1000.0
+    assert normalize_for_rank("悪") == normalize_for_rank("恶")
+    assert normalize_for_rank("亜") == normalize_for_rank("亚")
+    assert normalize_for_rank("円") == normalize_for_rank("圆")
+
+
+def test_normalize_falls_back_to_builtin_table_when_dictionary_missing(monkeypatch):
+    """JPVariants.txt 不可用时整体回落内置小表（転→转 仍生效，优雅退化）。"""
+    from plugin_pkg.suwayomi import ranking
+
+    monkeypatch.setattr(ranking, "_JP_TO_TRAD", None)
+    monkeypatch.setattr(ranking, "_TRAD_TO_JP", None)
+    monkeypatch.setattr(ranking, "_s2t", None)
+    monkeypatch.setattr(ranking, "_JP_EXTRA_TO_CN", ranking._JP_TO_CN)
+    ranking._normalize_cached.cache_clear()
+    try:
+        assert normalize_for_rank("転天") == normalize_for_rank("转天")
+        assert jp_variant("转天") == "転天"
+    finally:
+        ranking._normalize_cached.cache_clear()
