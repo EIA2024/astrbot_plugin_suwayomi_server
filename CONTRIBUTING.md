@@ -65,7 +65,7 @@ astrbot_plugin_suwayomi_server/
 │   ├── client.py              # Suwayomi GraphQL 异步 HTTP 客户端
 │   ├── config.py              # 分组配置读写、旧版平铺配置迁移
 │   ├── models.py              # 数据模型（Source, Manga, Chapter, SearchResult）
-│   ├── service.py             # 业务逻辑层（漫画/章节解析、缓存策略、格式化、跨源合并）
+│   ├── service.py             # 业务逻辑层（漫画/章节解析、缓存策略、格式化）
 │   ├── ranking.py             # 搜索相关度打分器（归一化 + 五级证据，纯函数）
 │   ├── bangumi.py             # Bangumi 别名解析（简称→官方名、镜像回退链、探针）
 │   ├── cards.py               # 指令结果卡片（T2I 模板、数据准备、简介清洗、封面嵌入、渲染缓存）
