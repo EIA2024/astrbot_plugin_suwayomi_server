@@ -40,6 +40,7 @@ ALLOWED_CONFIG_KEYS = {
     "search_result_ranking", "search_display_limit",
     "search_refresh_truncated_titles", "search_alias_expansion",
     "bangumi_mirror", "bangumi_mirror_url",
+    "file_delivery_max_pages",
 }
 
 # Numeric config keys with their minimum allowed values
@@ -55,6 +56,7 @@ NUMERIC_CONFIG_KEYS = {
     "ai_results_per_source": 1,
     "ai_tool_timeout_sec": 10,
     "search_display_limit": 1,
+    "file_delivery_max_pages": 1,
 }
 
 MAX_NUMERIC_CONFIG_KEYS = {
@@ -63,6 +65,7 @@ MAX_NUMERIC_CONFIG_KEYS = {
     "ai_results_per_source": 20,
     "ai_tool_timeout_sec": 300,
     "search_display_limit": 50,
+    "file_delivery_max_pages": 2000,
 }
 
 BOOLEAN_CONFIG_KEYS = {

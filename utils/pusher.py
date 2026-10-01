@@ -13,7 +13,7 @@ from astrbot.api.event import MessageChain
 from ..suwayomi.config import get_config_value
 from ..suwayomi.models import Chapter
 from ..suwayomi.service import fmt_chapter_display, sanitize_for_message
-from .downloader import FILE_DELIVERY_MAX_PAGES
+from .downloader import get_file_delivery_max_pages
 from .pack import build_chapter_output_path, normalize_pack_format, pack_images
 
 if TYPE_CHECKING:
@@ -221,9 +221,9 @@ async def push_chapter_file(
     title = sanitize_for_message(title, limit=80)
     fmt = get_config_value(config, "download_format", "pdf")
 
-    # 文件推送意图是整章打包，但仍设硬上限：恶意源可宣告超大页列表
+    # 文件推送意图是整章打包，但仍设页数上限：恶意源可宣告超大页列表
     _, page_urls, local_paths, tmp_dir = await fetch_pages_local_fn(
-        chapter.id, FILE_DELIVERY_MAX_PAGES
+        chapter.id, get_file_delivery_max_pages(config)
     )
     if not page_urls:
         schedule_cleanup(tmp_dir, delay=120)

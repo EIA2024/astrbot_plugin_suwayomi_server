@@ -72,9 +72,9 @@ from .suwayomi.t2i import make_endpoint_renderer, normalize_endpoint
 from .suwayomi.updater import check_updates as _check_updates
 from .suwayomi.updater import run_update_loop
 from .utils.downloader import (
-    FILE_DELIVERY_MAX_PAGES,
     download_cover,
     fetch_pages_local,
+    get_file_delivery_max_pages,
 )
 from .utils.pack import (
     build_chapter_output_path,
@@ -798,7 +798,7 @@ class SuwayomiPlugin(Star):
         total_pages, page_urls, local_paths, tmp_dir = await fetch_pages_local(
             self.client,
             target.id,
-            max_pages=FILE_DELIVERY_MAX_PAGES,
+            max_pages=get_file_delivery_max_pages(self.config),
             concurrency=concurrency,
             custom_tmp=custom_tmp,
             retries=retries,
@@ -1772,7 +1772,7 @@ class SuwayomiPlugin(Star):
             custom_tmp = get_config_value(self.config, "temp_dir", "").strip()
             retries = get_config_value(self.config, "download_retries", 3)
             _, page_urls, local_paths, tmp_dir = await fetch_pages_local(
-                self.client, target.id, max_pages=FILE_DELIVERY_MAX_PAGES,
+                self.client, target.id, max_pages=get_file_delivery_max_pages(self.config),
                 concurrency=concurrency, custom_tmp=custom_tmp, retries=retries,
                 headers=self.client.auth_headers,
             )

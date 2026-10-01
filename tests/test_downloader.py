@@ -9,6 +9,7 @@ from plugin_pkg.utils.downloader import (
     download_cover,
     download_images,
     download_one,
+    get_file_delivery_max_pages,
     resolve_image_url,
 )
 
@@ -272,3 +273,24 @@ class TestResolveImageUrlSsrfGuard:
         )
         assert url == "https://cdn.example.com/cover.jpg"
         assert headers is None
+
+
+class TestFileDeliveryMaxPages:
+    """PR #21 评审：整卷/合集章节页数可合法超过默认值，上限须用户可调。"""
+
+    def test_default_when_missing(self):
+        assert get_file_delivery_max_pages({}) == 300
+        assert get_file_delivery_max_pages(None) == 300
+
+    def test_configured_value_used(self):
+        assert get_file_delivery_max_pages(
+            {"file_delivery_max_pages": 500}
+        ) == 500
+
+    def test_invalid_values_fall_back(self):
+        assert get_file_delivery_max_pages({"file_delivery_max_pages": "abc"}) == 300
+        assert get_file_delivery_max_pages({"file_delivery_max_pages": None}) == 300
+
+    def test_non_positive_clamped_to_one(self):
+        assert get_file_delivery_max_pages({"file_delivery_max_pages": 0}) == 1
+        assert get_file_delivery_max_pages({"file_delivery_max_pages": -5}) == 1

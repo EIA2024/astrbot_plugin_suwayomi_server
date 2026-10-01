@@ -126,7 +126,7 @@ main.py (SuwayomiPlugin — thin dispatch layer)
 - `service.search_best_match(client, config, name, source_filter)` — 批量订阅用：多源搜索 + 源内 `rank_items` 选优
 - `service.refresh_truncated_titles(client, mangas)` — 并发刷新源站截断标题（原地替换）
 - `ranking.rank_items(query, items, title_of)` — 相关度打分排序（命令/AI/批量共用）
-- `downloader.download_images(urls, ...)` / `downloader.fetch_pages_local(client, chapter_id, max_pages, ...)` — 并行下载；文件打包路径统一传 `FILE_DELIVERY_MAX_PAGES` 上限
+- `downloader.download_images(urls, ...)` / `downloader.fetch_pages_local(client, chapter_id, max_pages, ...)` — 并行下载；文件打包路径统一传 `get_file_delivery_max_pages(config)`（配置 `file_delivery_max_pages`，默认 300）
 - `pusher.push_chapter_images(...)` / `pusher.push_chapter_file(...)` — 自动推送（图片/文件）；`build_image_chain` 为阅读、推送、AI 发送共用的消息链构建器
 - `main._prepare_chapter_delivery(event, chapter)` / `main._prepare_chapter_file_delivery(event, manga, chapter, fmt)` — 插件方法：构建阅读图片结果 / 打包文件结果（全页下载失败时返回 None 供调用方报错）
 - AI 工具按 `(unified_msg_origin, sender_id)` 隔离最近章节候选 10 分钟；发送工具只接受已暴露的 `(manga_id, chapter_id)` 对，per-scope `asyncio.Lock` 防并发发送，失败可重试

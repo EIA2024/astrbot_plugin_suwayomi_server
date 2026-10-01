@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 - **修复被源站截断的搜索标题** — 列表页截断标题（如「我的首推是恶役...」）经 GraphQL `fetchManga` 并发刷新为完整标题（上限 5 条/10s 超时，失败保留原标题走反向包含兜底排序）。配置 `search_refresh_truncated_titles`
 - **Bangumi 别名扩展搜索** — 关键词无强命中时（简称「我推恶役」、跨译名「海贼王/航海王」）通过 api.bgm.tv 解析官方译名/别名（top-5 条目 + 日文字形变体重试），别名探针有界 fan-out 重搜；扩展结果需强命中才并入展示并附透明提示行，别名增强仲裁对第一轮同样生效。配置 `search_alias_expansion`（默认开，失败静默跳过）
 - **Bangumi 公共镜像回退链** — 网络受限环境可选 `bangumi_mirror`：自定义镜像 → 内置公共镜像（api.bangumi.vip / bgmapi.anibt.net）→ 回退不使用 Bangumi；关闭时直连官方
+- **文件打包页数上限可配置** — 新增 `file_delivery_max_pages`（默认 300）：上限只用于挡住恶意源宣告的超大页列表，「第一卷」这类整卷/合集章节可合法超过默认值，用户可按需调大
 - `/漫画 搜索` 逐源串行改并发（与 AI 路径一致），5 源约 5–10s 降至约 3s
 
 ### Fixed
@@ -26,7 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 - 第三方文本清洗覆盖补全（此前仅搜索结果行）：更新推送标题与章节标签、推送头与发送失败回退、订阅列表、章节列表、多结果引导、阅读/下载加载提示等全部消息出口统一清洗（`sanitize_for_message` 下沉到 `fmt_chapter_label`/`fmt_chapter_display` 与标题入链出口，函数自 `bangumi.py` 迁至 `service.py`）
 - 更新通知文本路径与手动更新 summary 同样按 24 条截断并追加「+N 话」：水位线为 0 的存量订阅一次判新可达数百章，超长消息会超出平台长度限制导致推送整体失败（卡片路径此前已截断，文本为默认路径）
 - 搜索命令协程被取消（插件热重载/卸载）时同步取消并行的 Bangumi 解析任务，不再产生失去外层兜底的孤儿任务
-- 文件打包路径（下载/AI 发送/自动推送 file 模式）整章页数设 300 硬上限、单图片响应设 64MB 流式上限：防恶意源宣告超大页列表/响应打满磁盘内存
+- 文件打包路径（下载/AI 发送/自动推送 file 模式）整章页数设默认 300 上限（`file_delivery_max_pages` 可调）、单图片响应设 64MB 流式上限：防恶意源宣告超大页列表/响应打满磁盘内存
 - 封面绝对 URL 指向私网/环回/链路本地地址（字面 IP 与 localhost）时拒绝下载（SSRF 防护）；同源的内网 Suwayomi 地址不受影响、照常携带凭据
 - `sanitize_filename` 补控制字符（`\x00`–`\x1f`、`\x7f`）过滤、结尾点/空格剥离与 Windows 保留名（CON/COM1 等）前缀处理
 - WebUI 配置 API 补齐搜索排序/Bangumi 六个配置键的白名单与类型校验，仪表盘设置页新增「搜索排序」分区；`server_url` 非字符串直接 400，`username`/`password`/`temp_dir`/`bangumi_mirror_url` 补字符串类型门槛、`auth_mode` 补枚举校验

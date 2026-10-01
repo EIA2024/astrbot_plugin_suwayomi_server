@@ -257,6 +257,7 @@ uv pip install -r astrbot_suwayomi_server/requirements.txt
 | `download_format` | string | `pdf` | 下载打包格式：`zip` / `pdf` / `cbz` |
 | `download_concurrency` | int | `6` | 并行下载图片数（仅 `download` 模式） |
 | `download_retries` | int | `3` | 图片下载失败重试次数（指数退避） |
+| `file_delivery_max_pages` | int | `300` | 下载/推送打包为文件时的单章页数上限（防恶意源超大页列表）；「第一卷」这类整卷/合集章节可合法超过 300 页，推送被截断时按需调大 |
 
 ### 自动推送
 
@@ -283,11 +284,11 @@ uv pip install -r astrbot_suwayomi_server/requirements.txt
 | `chapter_list_show_cover` | bool | `true` | 「漫画 章节」列表顶部是否显示漫画封面；关闭后该命令不使用卡片渲染（回退纯文本） |
 | `default_source_id` | int | `0` | 默认搜索源 ID，`0` 搜索全部已安装源 |
 | `search_result_ranking` | bool | `true` | 搜索结果跨源按标题相关度排序（相等 > 包含 > 简称子序列 > 部分重叠），同分保持源顺序；关闭恢复按源分组的旧格式 |
-| `search_refresh_truncated_titles` | bool | `true` | 搜索标题以 `...` 结尾时自动从源站详情页刷新为完整标题 |
 | `search_alias_expansion` | bool | `true` | 关键词无强命中时通过 Bangumi 解析官方译名/别名并换名重搜（简称「我推恶役」、跨译名「海贼王/航海王」）；需可访问 api.bgm.tv |
-| `search_display_limit` | int | `20` | 开启相关度排序后最多显示的搜索结果条数；超过显示上限的结果无法通过编号订阅，可调大（≤50）或用「搜索 关键词 源名」锁定单源 |
+| `search_refresh_truncated_titles` | bool | `true` | 搜索标题以 `...` 结尾时自动从源站详情页刷新为完整标题 |
 | `bangumi_mirror` | bool | `false` | 网络受限环境启用 Bangumi 公共镜像回退链（自定义镜像 → 内置 api.bangumi.vip / bgmapi.anibt.net → 回退不使用别名扩展）；关闭时仅直连官方 |
 | `bangumi_mirror_url` | string | `""` | 自定义 Bangumi API 镜像根地址，留空用内置公共镜像；需同时开启 `bangumi_mirror` 与 `search_alias_expansion`（后者依赖相关度排序） |
+| `search_display_limit` | int | `20` | 开启相关度排序后最多显示的搜索结果条数；超过显示上限的结果无法通过编号订阅，可调大（≤50）或用「搜索 关键词 源名」锁定单源 |
 | `temp_dir` | string | `""` | 临时文件目录。留空用系统默认，Docker 环境设置共享目录如 `/AstrBot/data/temp` |
 
 ### 认证模式说明

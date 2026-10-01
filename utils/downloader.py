@@ -12,6 +12,8 @@ import aiohttp
 
 from astrbot.api import logger
 
+from ..suwayomi.config import get_config_value
+
 if TYPE_CHECKING:
     from ..suwayomi.client import SuwayomiClient
 
@@ -19,9 +21,23 @@ from ..suwayomi import PLUGIN_NAME
 
 _PLUGIN_NAME = PLUGIN_NAME
 
-# 文件打包路径（下载/AI 发送/自动推送 file 模式）的整章页数硬上限：
-# 正常章节远低于此值，仅用于挡住恶意源宣告的超大页列表
+# 文件打包路径（下载/AI 发送/自动推送 file 模式）的整章页数默认上限：
+# 正常章节远低于此值，仅用于挡住恶意源宣告的超大页列表；整卷/合集
+# 章节可合法超过默认值，用户可通过 file_delivery_max_pages 配置调大
 FILE_DELIVERY_MAX_PAGES = 300
+
+
+def get_file_delivery_max_pages(config: dict | None) -> int:
+    """文件打包路径的整章页数上限（配置缺省/非法时回落 300）。"""
+    try:
+        value = int(
+            get_config_value(
+                config or {}, "file_delivery_max_pages", FILE_DELIVERY_MAX_PAGES
+            )
+        )
+    except (TypeError, ValueError):
+        return FILE_DELIVERY_MAX_PAGES
+    return max(1, value)
 
 # 单张图片响应的字节上限（防恶意源用超大响应打满内存/磁盘）
 _MAX_IMAGE_BYTES = 64 * 1024 * 1024

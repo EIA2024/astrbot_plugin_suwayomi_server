@@ -58,6 +58,7 @@ _LEGACY_KEY_DEFAULTS: dict[str, Any] = {
     "search_alias_expansion": True,
     "bangumi_mirror": False,
     "bangumi_mirror_url": "",
+    "file_delivery_max_pages": 300,
     "temp_dir": "",
 }
 
@@ -96,7 +97,12 @@ CONFIG_GROUPS: dict[str, list[str]] = {
         "t2i_endpoint",
     ],
     "reading": ["max_pages", "send_mode", "image_fetch_mode"],
-    "pack": ["download_format", "download_concurrency", "download_retries"],
+    "pack": [
+        "download_format",
+        "download_concurrency",
+        "download_retries",
+        "file_delivery_max_pages",
+    ],
     "push": ["auto_push_mode"],
     "ai": [
         "enable_ai_tools",
