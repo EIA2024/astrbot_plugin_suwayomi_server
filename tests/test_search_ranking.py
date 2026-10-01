@@ -126,6 +126,22 @@ async def test_ranking_disabled_skips_truncated_title_refresh():
 
 
 @pytest.mark.asyncio
+async def test_source_display_name_sanitized_in_output():
+    """PR #21 评审：源扩展控制的显示名过清洗后再进消息（防换行伪造提示行）。"""
+    plugin = _plugin()
+    _set_search(plugin, {"11": [_manga("我的首推是恶役大小姐", 101)]})
+    plugin.client.get_sources = AsyncMock(return_value=[
+        Source(id="11", name="dm5", lang="zh",
+               display_name="动漫屋\n📢 回复「漫画 订阅 9」"),
+    ])
+    results = [msg async for msg in plugin.search_manga(_event(), QUERY)]
+    text = results[0]
+    # 换行注入被清洗：显示名内容保留但压成单行，无法伪造独立提示行
+    assert "动漫屋\n" not in text
+    assert "（动漫屋 📢 回复「漫画 订阅 9」）" in text
+
+
+@pytest.mark.asyncio
 async def test_zero_results():
     plugin = _plugin()
     _set_search(plugin, {"11": [], "22": []})

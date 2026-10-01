@@ -203,8 +203,9 @@ bgm.tv 模糊搜索解析官方译名/别名（top-5 条目 + 日文字形变体
 - `download_one(session, url, dest, retries)` — 单图下载，指数退避重试；流式读取并对单响应设 64MB 字节上限（防恶意源超大响应打满内存/磁盘）
 - `download_images(urls, concurrency, custom_tmp, retries, headers)` — 并行批量下载，返回 `(paths, tmp_dir)`。`headers` 参数用于注入认证头（`client.auth_headers`），确保认证服务器下的图片下载正常
 - `download_cover(client, thumbnail_url, custom_tmp, retries, headers)` — 下载单张漫画封面到临时目录，返回 `(local_path, tmp_dir)`；失败返回 `(None, None)`，供 `/漫画 章节` 列表顶部展示封面
-- `fetch_pages_local(client, chapter_id, max_pages, concurrency, custom_tmp, retries, headers)` — 获取页面列表并下载到临时目录，返回 `(total_pages, page_urls, local_paths, tmp_dir)`。透传 `headers` 到 `download_images`；文件打包路径（下载/AI 发送/file 推送）统一传 `max_pages=FILE_DELIVERY_MAX_PAGES(300)` 硬上限
+- `fetch_pages_local(client, chapter_id, max_pages, concurrency, custom_tmp, retries, headers)` — 获取页面列表并下载到临时目录，返回 `(total_pages, page_urls, local_paths, tmp_dir)`。透传 `headers` 到 `download_images`；文件打包路径（下载/AI 发送/file 推送）统一传 `max_pages=get_file_delivery_max_pages(config)`（配置 `file_delivery_max_pages`，默认 300）
 - `resolve_image_url(client, thumbnail_url, auth_headers)` — 封面 URL 决策：相对路径拼服务器地址并带认证头；绝对 URL 仅同源时附凭据；第三方绝对地址指向私网/环回（字面 IP/localhost）时拒绝（防 SSRF），调用方按无封面降级
+- `download_one(session, url, dest, retries)` — 单张图片下载：禁用自动重定向并逐跳校验目标（同 origin 或公网放行，跳向第三方私网拒绝，上限 4 跳），防 302 绕过 `resolve_image_url` 的私网过滤
 
 #### `utils/pusher.py` — 推送投递
 

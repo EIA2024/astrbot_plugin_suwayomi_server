@@ -881,7 +881,7 @@ class SuwayomiPlugin(Star):
                 return
             lines = ["📚 已安装的漫画源:"]
             for i, src in enumerate(sources, 1):
-                lines.append(f"  [{i}] {src.display_name} ({src.lang})")
+                lines.append(f"  [{i}] {sanitize_for_message(src.display_name, limit=40)} ({src.lang})")
             yield event.plain_result("\n".join(lines))
         except SuwayomiError as e:
             yield event.plain_result(f"获取源列表失败: {e}")
@@ -957,10 +957,11 @@ class SuwayomiPlugin(Star):
                     result = await asyncio.wait_for(
                         self.client.search_manga(src.id, search_query), timeout=15
                     )
-                    return src.display_name, result
+                    # 来源显示名由源扩展控制，进入消息前过清洗
+                    return sanitize_for_message(src.display_name, limit=40), result
                 except Exception as e:
                     logger.warning(f"[{PLUGIN_NAME}] 搜索源 {src.name} 失败: {e}")
-                    return src.display_name, None
+                    return sanitize_for_message(src.display_name, limit=40), None
 
             # Bangumi 别名解析与源搜索并行执行，互不等待
             resolve_task = (
@@ -1051,9 +1052,9 @@ class SuwayomiPlugin(Star):
                             result = await asyncio.wait_for(
                                 self.client.search_manga(src.id, query), timeout=15
                             )
-                            return result, src.display_name, sid
+                            return result, sanitize_for_message(src.display_name, limit=40), sid
                         except Exception:
-                            return None, src.display_name, sid
+                            return None, sanitize_for_message(src.display_name, limit=40), sid
 
                     probe_responses = await asyncio.gather(
                         *(
@@ -1256,7 +1257,10 @@ class SuwayomiPlugin(Star):
                 return
 
             sources = await self.client.get_sources()
-            src_map = {str(s.id): s.display_name for s in sources}
+            src_map = {
+                str(s.id): sanitize_for_message(s.display_name, limit=40)
+                for s in sources
+            }
             source_filter = None
             search_str = args_str
 
@@ -1398,7 +1402,10 @@ class SuwayomiPlugin(Star):
                 yield event.plain_result("📭 你还没有订阅任何漫画。使用「漫画 搜索」来查找并订阅。")
                 return
             sources = await self.client.get_sources()
-            src_map = {str(s.id): s.display_name for s in sources}
+            src_map = {
+                str(s.id): sanitize_for_message(s.display_name, limit=40)
+                for s in sources
+            }
 
             if self._result_cards_enabled():
                 try:
@@ -1581,7 +1588,14 @@ class SuwayomiPlugin(Star):
 
             try:
                 sources = await self.client.get_sources()
-                src_name = next((s.display_name for s in sources if str(s.id) == str(manga.source_id)), None)
+                src_name = next(
+                    (
+                        sanitize_for_message(s.display_name, limit=40)
+                        for s in sources
+                        if str(s.id) == str(manga.source_id)
+                    ),
+                    None,
+                )
             except Exception:
                 src_name = None
             src_tag = f" - {src_name}" if src_name else ""

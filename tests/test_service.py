@@ -11,6 +11,7 @@ from suwayomi.service import (
     fmt_chapter_display,
     fmt_chapter_label,
     resolve_chapter,
+    sanitize_for_message,
 )
 
 
@@ -369,6 +370,16 @@ def test_fmt_chapter_label_sanitizes_dirty_chapter_name():
     label = fmt_chapter_label(ch, {1.0: 1})
     assert "\n" not in label
     assert label.startswith("#1 第1话 ")
+
+
+def test_sanitize_for_message_strips_extra_control_and_invisible_chars():
+    """PR #21 评审：VT/FF/ESC/NEL/行分隔/零宽字符不得穿透清洗。"""
+    dirty = "标\x0b题\x0c名\x1b[31m红\u2028色\u200b版\ufeff本\x85尾"
+    out = sanitize_for_message(dirty)
+    for ch in ("\x0b", "\x0c", "\x1b", "\x85", "\u2028", "\u2029", "\u200b", "\ufeff"):
+        assert ch not in out
+    # 控制字符→空格；零宽字符直接删除（色版本连写）
+    assert out == "标 题 名 [31m红 色版本 尾"
 
 
 def test_fmt_chapter_display_sanitizes_dirty_chapter_name():

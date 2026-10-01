@@ -66,13 +66,16 @@ async def test_download_one_retries_then_succeeds(tmp_path):
         async def iter_chunked(self, n):
             yield b"data"
 
+        async def release(self):
+            pass
+
         async def __aenter__(self):
             return self
 
         async def __aexit__(self, *a):
             return False
 
-    def fake_get(url, timeout=None):
+    async def fake_get(url, timeout=None, allow_redirects=True):
         return Resp(responses.pop(0))
 
     session = AsyncMock()
@@ -273,6 +276,103 @@ class TestResolveImageUrlSsrfGuard:
         )
         assert url == "https://cdn.example.com/cover.jpg"
         assert headers is None
+
+
+class _FakeResp:
+    def __init__(self, status, headers=None):
+        self.status = status
+        self.headers = headers if headers is not None else {
+            "Content-Type": "image/jpeg"
+        }
+        self.content = self
+
+    async def iter_chunked(self, n):
+        yield b"data"
+
+    async def release(self):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+
+def _session_routing(routes: dict):
+    """session.get 按 URL 精确路由到预置响应；返回 (session, calls)。"""
+    calls: list[str] = []
+
+    async def get(url, timeout=None, allow_redirects=True):
+        calls.append(url)
+        assert allow_redirects is False, "must disable auto redirects"
+        return routes[url]
+
+    session = AsyncMock()
+    session.get = get
+    return session, calls
+
+
+class TestSsrfRedirectGuard:
+    """PR #21 评审：aiohttp 自动跟随重定向会绕过私网地址过滤，须逐跳校验。"""
+
+    @pytest.mark.asyncio
+    async def test_redirect_to_private_host_refused(self, tmp_path):
+        session, calls = _session_routing({
+            "https://cdn.example.com/cover.jpg": _FakeResp(302, {
+                "Content-Type": "text/plain", "Location": "http://127.0.0.1/evil"
+            }),
+        })
+        ok = await download_one(
+            session, "https://cdn.example.com/cover.jpg", tmp_path / "img"
+        )
+        assert ok is False
+        # 私网目标被拒：只发出了首个请求，从未向 127.0.0.1 发起连接
+        assert calls == ["https://cdn.example.com/cover.jpg"]
+
+    @pytest.mark.asyncio
+    async def test_redirect_to_same_origin_private_allowed(self, tmp_path):
+        # 初始 URL 即同服务器私网（Suwayomi 内网部署常态）：跳回自身 origin 放行
+        session, calls = _session_routing({
+            "http://192.168.1.5:4567/api/v1/manga/1/thumbnail": _FakeResp(302, {
+                "Content-Type": "text/plain",
+                "Location": "http://192.168.1.5:4567/api/v1/manga/1/thumbnail/v2",
+            }),
+            "http://192.168.1.5:4567/api/v1/manga/1/thumbnail/v2": _FakeResp(200),
+        })
+        ok = await download_one(
+            session,
+            "http://192.168.1.5:4567/api/v1/manga/1/thumbnail",
+            tmp_path / "img",
+        )
+        assert ok is True and len(calls) == 2
+
+    @pytest.mark.asyncio
+    async def test_redirect_to_public_host_followed(self, tmp_path):
+        session, calls = _session_routing({
+            "https://cdn.example.com/cover.jpg": _FakeResp(302, {
+                "Content-Type": "text/plain", "Location": "https://img.example.net/c.png"
+            }),
+            "https://img.example.net/c.png": _FakeResp(200),
+        })
+        ok = await download_one(
+            session, "https://cdn.example.com/cover.jpg", tmp_path / "img"
+        )
+        assert ok is True and len(calls) == 2
+
+    @pytest.mark.asyncio
+    async def test_relative_location_resolved_against_current_url(self, tmp_path):
+        session, calls = _session_routing({
+            "https://cdn.example.com/a/cover.jpg": _FakeResp(302, {
+                "Content-Type": "text/plain", "Location": "../b/real.png"
+            }),
+            "https://cdn.example.com/b/real.png": _FakeResp(200),
+        })
+        ok = await download_one(
+            session, "https://cdn.example.com/a/cover.jpg", tmp_path / "img"
+        )
+        assert ok is True
+        assert calls[-1] == "https://cdn.example.com/b/real.png"
 
 
 class TestFileDeliveryMaxPages:

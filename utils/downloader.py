@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 import aiohttp
+from yarl import URL
 
 from astrbot.api import logger
 
@@ -42,13 +43,66 @@ def get_file_delivery_max_pages(config: dict | None) -> int:
 # 单张图片响应的字节上限（防恶意源用超大响应打满内存/磁盘）
 _MAX_IMAGE_BYTES = 64 * 1024 * 1024
 
+# 手动跟随重定向的最大跳数
+_MAX_REDIRECTS = 4
+
+_REDIRECT_STATUSES = (301, 302, 303, 307, 308)
+
+
+def _origin_of(url: str) -> str | None:
+    """URL 的 origin（scheme://netloc）；非 http(s) 或无主机返回 None。"""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        return None
+    return f"{parsed.scheme}://{parsed.netloc.lower()}"
+
+
+async def _open_without_ssrf_redirect(
+    session: aiohttp.ClientSession, url: str, timeout: aiohttp.ClientTimeout
+) -> aiohttp.ClientResponse | None:
+    """逐跳打开 URL（禁用自动重定向），拒绝跳向第三方私网地址。
+
+    aiohttp 默认自动跟随重定向，会绕过 resolve_image_url 的私网地址
+    过滤（302 → 127.0.0.1 可被跟随）。以初始 URL 的 origin 为可信基准
+    （初始地址已由上游按同服务器/私网规则过滤）：重定向目标仅允许
+    同 origin 或公网地址。被拒/超跳数/缺少 Location 返回 None，调用方
+    按下载失败降级。
+    """
+    current = url
+    trusted_origin = _origin_of(url)
+    for _ in range(_MAX_REDIRECTS + 1):
+        resp = await session.get(current, timeout=timeout, allow_redirects=False)
+        if resp.status not in _REDIRECT_STATUSES:
+            return resp
+        location = resp.headers.get("Location")
+        await resp.release()
+        if not location:
+            return None
+        target = str(URL(current).join(URL(location)))
+        target_origin = _origin_of(target)
+        if target_origin is None or (
+            target_origin != trusted_origin
+            and _is_private_host(urlparse(target).hostname)
+        ):
+            logger.warning(
+                f"[{_PLUGIN_NAME}] 拒绝跟随重定向到不可信地址: {target}"
+            )
+            return None
+        current = target
+    return None
+
 
 async def download_one(
     session: aiohttp.ClientSession, url: str, dest: Path, retries: int = 3
 ) -> bool:
     for attempt in range(retries):
         try:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+            resp = await _open_without_ssrf_redirect(
+                session, url, aiohttp.ClientTimeout(total=30)
+            )
+            if resp is None:
+                return False
+            async with resp:
                 if resp.status == 200:
                     chunks: list[bytes] = []
                     size = 0

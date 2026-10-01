@@ -68,12 +68,23 @@ def fmt_chapter_num(num: float) -> int | float | str:
         return "?"
 
 
-def sanitize_for_message(text: str, limit: int = 50) -> str:
-    """第三方文本（源站标题/章节名、Bangumi 别名）进入消息前的最小清洗。
+# 控制字符/行分隔符/RTL 方向控制符 → 替换为空格；再加零宽字符（ZWSP/BOM）删除
+_CONTROL_CHARS_RE = re.compile(
+    "[\r\n\t\x0b\x0c\x1b\x85\u2028\u2029"
+    + chr(0x202A) + "-" + chr(0x202E)
+    + chr(0x2066) + "-" + chr(0x2069) + "]+"
+)
+_INVISIBLE_CHARS_RE = re.compile("[\u200b\ufeff]+")
 
-    剥离换行/制表/RTL 控制符（防止伪造系统提示行），限长防爆屏。
+
+def sanitize_for_message(text: str, limit: int = 50) -> str:
+    """第三方文本（源站标题/章节名/来源名、Bangumi 别名）进入消息前的最小清洗。
+
+    剥离换行/制表/垂直制表/换页/ESC/NEL/行分隔/RTL 控制符（防止伪造
+    系统提示行与终端转义序列），删除零宽空格与 BOM，限长防爆屏。
     """
-    cleaned = re.sub("[" + chr(13) + chr(10) + chr(9) + chr(0x202A) + "-" + chr(0x202E) + chr(0x2066) + "-" + chr(0x2069) + "]+", " ", str(text or ""))
+    cleaned = _CONTROL_CHARS_RE.sub(" ", str(text or ""))
+    cleaned = _INVISIBLE_CHARS_RE.sub("", cleaned)
     return cleaned.strip()[:limit]
 
 
@@ -406,7 +417,10 @@ async def resolve_manga(
         src_map: dict[str, str] = {}
         try:
             sources = await client.get_sources()
-            src_map = {str(s.id): s.display_name for s in sources}
+            src_map = {
+                str(s.id): sanitize_for_message(s.display_name, limit=40)
+                for s in sources
+            }
         except Exception:
             pass
 

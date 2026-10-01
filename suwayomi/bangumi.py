@@ -146,7 +146,14 @@ def _quote_keyword(keyword: str) -> str:
 
 
 async def _get_json(session: aiohttp.ClientSession, url: str) -> dict:
-    async with session.get(url, headers=_HEADERS) as resp:
+    # 不跟随重定向：bgm API 正常不重定向，端点被 302 到私网地址属
+    # SSRF 面；3xx 按端点失败处理，由 resolve_aliases 走回退链
+    async with session.get(url, headers=_HEADERS, allow_redirects=False) as resp:
+        if 300 <= resp.status < 400:
+            location = resp.headers.get("Location", "")
+            raise aiohttp.ClientError(
+                f"HTTP {resp.status} redirect to {location!r} refused (SSRF guard)"
+            )
         resp.raise_for_status()
         return await resp.json(content_type=None)
 
