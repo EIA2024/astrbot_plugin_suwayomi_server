@@ -34,7 +34,7 @@
 
 | | 功能 | 说明 |
 |---|---|---|
-| 🔍 | **多源搜索** | 跨多个已安装漫画源全局搜索，智能合并结果 |
+| 🔍 | **多源搜索** | 跨多个已安装漫画源全局搜索，按相关度混排展示 |
 | 🤖 | **Agent工具** | 注册 AstrBot Agent Tool，支持 LLM 调用，从而搜索、发送漫画 |
 | 📖 | **在线阅读** | 直接在聊天中阅读漫画章节，支持逐页发送或合并转发 |
 | ⬇️ | **章节下载** | 下载章节页面并打包为 ZIP/PDF/CBZ 文件发送到聊天 |
@@ -285,7 +285,7 @@ uv pip install -r astrbot_suwayomi_server/requirements.txt
 | `search_result_ranking` | bool | `true` | 搜索结果跨源按标题相关度排序（相等 > 包含 > 简称子序列 > 部分重叠），同分保持源顺序；关闭恢复按源分组的旧格式 |
 | `search_refresh_truncated_titles` | bool | `true` | 搜索标题以 `...` 结尾时自动从源站详情页刷新为完整标题 |
 | `search_alias_expansion` | bool | `true` | 关键词无强命中时通过 Bangumi 解析官方译名/别名并换名重搜（简称「我推恶役」、跨译名「海贼王/航海王」）；需可访问 api.bgm.tv |
-| `search_display_limit` | int | `20` | 开启相关度排序后最多显示的搜索结果条数（跨源同书合并后按去重计）；超过显示上限的结果无法通过编号订阅，可调大（≤50）或用「搜索 关键词 源名」锁定单源 |
+| `search_display_limit` | int | `20` | 开启相关度排序后最多显示的搜索结果条数；超过显示上限的结果无法通过编号订阅，可调大（≤50）或用「搜索 关键词 源名」锁定单源 |
 | `bangumi_mirror` | bool | `false` | 网络受限环境启用 Bangumi 公共镜像回退链（自定义镜像 → 内置 api.bangumi.vip / bgmapi.anibt.net → 回退不使用别名扩展）；关闭时仅直连官方 |
 | `bangumi_mirror_url` | string | `""` | 自定义 Bangumi API 镜像根地址，留空用内置公共镜像；需同时开启 `bangumi_mirror` 与 `search_alias_expansion`（后者依赖相关度排序） |
 | `temp_dir` | string | `""` | 临时文件目录。留空用系统默认，Docker 环境设置共享目录如 `/AstrBot/data/temp` |

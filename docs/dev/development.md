@@ -15,7 +15,7 @@ astrbot_suwayomi_server/
 │   ├── client.py              # Suwayomi GraphQL 异步 HTTP 客户端
 │   ├── config.py              # 分组配置读写、旧版平铺配置迁移（get/set/flatten/migrate）
 │   ├── models.py              # 数据模型定义
-│   ├── service.py             # 业务逻辑层（漫画/章节解析、缓存策略、格式化、跨源合并）
+│   ├── service.py             # 业务逻辑层（漫画/章节解析、缓存策略、格式化）
 │   ├── ranking.py             # 搜索相关度打分器（归一化 + 五级证据，纯函数零依赖）
 │   ├── bangumi.py             # Bangumi 别名解析（简称→官方名、镜像回退链、探针构建）
 │   ├── cards.py               # 指令结果卡片（T2I 模板、数据准备、简介清洗、封面嵌入、渲染缓存）
@@ -47,7 +47,7 @@ astrbot_suwayomi_server/
 │   ├── test_subscription.py   # 订阅管理单元测试
 │   ├── test_ranking.py        # 搜索相关度打分器单元测试
 │   ├── test_bangumi.py        # Bangumi 别名解析单元测试
-│   ├── test_search_ranking.py # 搜索排序/合并/扩展命令级测试
+│   ├── test_search_ranking.py # 搜索排序/截断刷新/扩展命令级测试
 │   ├── test_web_api.py        # WebUI API handler 单元测试
 │   ├── test_batch_subscribe.py # 批量订阅参数解析单元测试
 │   ├── test_push.py           # 自动推送单元测试
@@ -264,7 +264,7 @@ bgm.tv 模糊搜索解析官方译名/别名（top-5 条目 + 日文字形变体
 用户输入 → search_manga() → 选源（跳过本地源，优先不同扩展）
          → Bangumi 别名解析 ∥ 全源并发 client.search_manga()（单源 15s 超时，链级 20s 预算）
          → 截断标题刷新（详情页补全，上限 5 条）→ ranking.rank_items 相关度打分
-         → merge_duplicate_results 跨源同书合并 → 无强命中时用 Bangumi 别名探针二轮重搜
+         → 无强命中时用 Bangumi 别名探针二轮重搜
          → 显示前 N 条（search_display_limit，默认 20）→ 缓存编号到 _search_cache
 ```
 

@@ -123,7 +123,6 @@ main.py (SuwayomiPlugin — thin dispatch layer)
 - `service.get_or_fetch_chapters(client, get_kv_data, put_kv_data, config, manga_id, force)` — 章节缓存读取/源拉取；`force=True` 绕过缓存（更新检查恒 force）
 - `service.get_chapter_timestamp(...)` / `service.set_chapter_timestamp(...)` — KV 中的章节拉取时间戳
 - `service.fmt_chapter_display(ch)` / `service.fmt_chapter_label(ch, num_counts)` — 章节的展示名 / `#num name (ID:xxx)` 标签；内部统一过 `sanitize_for_message` 清洗（源站文本防注入）
-- `service.merge_duplicate_results(pool)` — 跨源同书合并（归一化标题相等；代表取非截断最长标题；来源名按组成源去重拼接）
 - `service.search_best_match(client, config, name, source_filter)` — 批量订阅用：多源搜索 + 源内 `rank_items` 选优
 - `service.refresh_truncated_titles(client, mangas)` — 并发刷新源站截断标题（原地替换）
 - `ranking.rank_items(query, items, title_of)` — 相关度打分排序（命令/AI/批量共用）

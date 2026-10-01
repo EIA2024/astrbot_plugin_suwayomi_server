@@ -10,7 +10,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 ### Added
 
 - **搜索结果跨源相关度排序** — 新增 `suwayomi/ranking.py` 纯函数打分器：归一化（NFKC/大小写/繁简/日文新字体/标点）后按五级证据打分（完全相等 1000 > 正向包含 900 > 反向包含 880 > 子序列简称 800–860（fzf 式紧凑度）> 部分重叠 ≤800），同分稳定保序。`/漫画 搜索` 输出改为混排列表（行内标注源名），编号在排序后分配，`订阅 <编号>` 映射保持一致；AI 搜索工具与批量订阅选书（`search_best_match` 源内选优）共用同一打分器。配置 `search_result_ranking`（默认开，关闭恢复按源分组旧格式）与 `search_display_limit`（默认 20）
-- **跨源同书合并展示** — 归一化标题相同的多个源结果合并为一条（来源并列标注、代表副本取标题完整且最长者、订阅订代表副本），省出展示位
 - **修复被源站截断的搜索标题** — 列表页截断标题（如「我的首推是恶役...」）经 GraphQL `fetchManga` 并发刷新为完整标题（上限 5 条/10s 超时，失败保留原标题走反向包含兜底排序）。配置 `search_refresh_truncated_titles`
 - **Bangumi 别名扩展搜索** — 关键词无强命中时（简称「我推恶役」、跨译名「海贼王/航海王」）通过 api.bgm.tv 解析官方译名/别名（top-5 条目 + 日文字形变体重试），别名探针有界 fan-out 重搜；扩展结果需强命中才并入展示并附透明提示行，别名增强仲裁对第一轮同样生效。配置 `search_alias_expansion`（默认开，失败静默跳过）
 - **Bangumi 公共镜像回退链** — 网络受限环境可选 `bangumi_mirror`：自定义镜像 → 内置公共镜像（api.bangumi.vip / bgmapi.anibt.net）→ 回退不使用 Bangumi；关闭时直连官方
@@ -27,7 +26,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 - 第三方文本清洗覆盖补全（此前仅搜索结果行）：更新推送标题与章节标签、推送头与发送失败回退、订阅列表、章节列表、多结果引导、阅读/下载加载提示等全部消息出口统一清洗（`sanitize_for_message` 下沉到 `fmt_chapter_label`/`fmt_chapter_display` 与标题入链出口，函数自 `bangumi.py` 迁至 `service.py`）
 - 更新通知文本路径与手动更新 summary 同样按 24 条截断并追加「+N 话」：水位线为 0 的存量订阅一次判新可达数百章，超长消息会超出平台长度限制导致推送整体失败（卡片路径此前已截断，文本为默认路径）
 - 搜索命令协程被取消（插件热重载/卸载）时同步取消并行的 Bangumi 解析任务，不再产生失去外层兜底的孤儿任务
-- 跨两轮（首轮合并 + 探针重搜）合并时来源名按组成源去重，不再出现「动漫屋、漫画社、漫画社」
 - 文件打包路径（下载/AI 发送/自动推送 file 模式）整章页数设 300 硬上限、单图片响应设 64MB 流式上限：防恶意源宣告超大页列表/响应打满磁盘内存
 - 封面绝对 URL 指向私网/环回/链路本地地址（字面 IP 与 localhost）时拒绝下载（SSRF 防护）；同源的内网 Suwayomi 地址不受影响、照常携带凭据
 - `sanitize_filename` 补控制字符（`\x00`–`\x1f`、`\x7f`）过滤、结尾点/空格剥离与 Windows 保留名（CON/COM1 等）前缀处理

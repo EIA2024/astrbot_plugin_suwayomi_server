@@ -378,18 +378,3 @@ def test_fmt_chapter_display_sanitizes_dirty_chapter_name():
     assert displayed == "第1话 伪造 系统行"
 
 
-def test_merge_duplicate_results_dedupes_joined_source_names():
-    """T3-13 回归：跨两轮合并时来源名按组成源去重，不出现「A、B、B」。"""
-    from suwayomi.models import Manga
-    from suwayomi.service import merge_duplicate_results
-
-    def _m(mid):
-        return Manga(id=mid, source_id=1, url="", title="同一本书")
-
-    pool = [
-        (_m(1), "动漫屋、漫画社", None),   # 第一轮合并后的连接串
-        (_m(2), "漫画社", 7),             # 第二轮探针重新捞回的单源副本
-    ]
-    merged = merge_duplicate_results(pool)
-    assert len(merged) == 1
-    assert merged[0][1] == "动漫屋、漫画社"
