@@ -181,6 +181,7 @@ mutation($id:Int!){fetchManga(input:{id:$id}){manga{id title url sourceId status
 ```
 
 触发源站详情页解析器刷新并持久化漫画数据。插件用于修复搜索列表页截断的标题（`refresh_truncated_titles`）。
+
 ## 关键数据类型
 
 ### MangaType

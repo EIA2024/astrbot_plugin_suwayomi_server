@@ -5,7 +5,7 @@ import re
 import time
 from typing import Any
 
-from .config import get_config_value
+from .config import config_bool, get_config_value
 from .models import Chapter, Manga, Source
 from .ranking import score_title
 from .service import (
@@ -200,6 +200,9 @@ async def search_manga_for_agent(
         except Exception as exc:  # one broken source must not fail the whole search
             return source, None, str(exc)
 
+    ranking_on = config_bool(
+        get_config_value(config, "search_result_ranking", True), True
+    )
     responses = await asyncio.gather(*(_search(source) for source in target_sources))
     results: list[dict] = []
     errors: list[dict] = []
@@ -212,7 +215,7 @@ async def search_manga_for_agent(
             continue
         successful_sources += 1
         mangas = search_result.mangas
-        if get_config_value(config, "search_result_ranking", True):
+        if ranking_on:
             # 每源先按相关度排序再截取：源自身排序差时（真目标在第 6 位）
             # 直接按源序取前 N 条会把它挡在 Agent 之外
             mangas = sorted(mangas, key=lambda m: -score_title(query, m.title))
@@ -222,7 +225,7 @@ async def search_manga_for_agent(
             seen_ids.add(manga.id)
             results.append(manga_to_agent_dict(manga, source.display_name))
 
-    if get_config_value(config, "search_result_ranking", True):
+    if ranking_on:
         # 跨源再统一按标题相关度稳定降序，与 /漫画 搜索 共用同一打分器
         results.sort(key=lambda r: -score_title(query, r["title"]))
 

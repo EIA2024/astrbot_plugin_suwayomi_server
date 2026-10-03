@@ -221,5 +221,9 @@ class TestSanitizeFilenameHardening:
     def test_trailing_dot_and_space_stripped(self):
         assert sanitize_filename("第1话. ") == "第1话"
 
+    def test_truncation_does_not_reintroduce_trailing_dot(self):
+        # 截断位恰好落在点上时也不得留下结尾点（PR #21 复审）
+        assert sanitize_filename("a" * 49 + "." + "b", max_len=50) == "a" * 49
+
     def test_normal_name_unchanged(self):
         assert sanitize_filename("一拳超人 第1话") == "一拳超人 第1话"

@@ -28,12 +28,17 @@ from dataclasses import dataclass, field
 
 import aiohttp
 
+from astrbot.api import logger
+
+from . import PLUGIN_NAME
 from .ranking import (
     STRONG_MATCH_THRESHOLD,
     jp_variant,
     normalize_for_rank,
     score_title,
 )
+
+_PLUGIN_NAME = PLUGIN_NAME
 
 OFFICIAL_API_BASE = "https://api.bgm.tv"
 # 社区公共镜像（bangumi.vip 为 Mirrox 全域镜像、anibt.net 为 nginx API 反代；
@@ -222,7 +227,11 @@ async def _resolve_via(
                         subject = await _get_json(
                             session, base + _SUBJECT_PATH.format(sid=sid)
                         )
-                    except Exception:
+                    except Exception as exc:
+                        # 单个条目失败跳过不阻塞，调试日志留痕
+                        logger.debug(
+                            f"[{_PLUGIN_NAME}] Bangumi 条目 {sid} 详情解析失败: {exc}"
+                        )
                         return
                     names = parse_subject(subject)
                     if names:
@@ -236,7 +245,8 @@ async def _resolve_via(
                 jp = jp_variant(query)
                 if jp and jp != query:
                     await _collect(jp)
-    except Exception:
+    except Exception as exc:
+        logger.debug(f"[{_PLUGIN_NAME}] Bangumi 端点 {base} 解析失败: {exc}")
         return None
 
     resolution.best_alias_score = best_alias_score(query, resolution)

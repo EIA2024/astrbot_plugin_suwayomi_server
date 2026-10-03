@@ -34,7 +34,7 @@ from .suwayomi.cards import (
     render_card_cached,
 )
 from .suwayomi.client import SuwayomiClient, SuwayomiError
-from .suwayomi.config import get_config_value, migrate_legacy_config
+from .suwayomi.config import config_bool, get_config_value, migrate_legacy_config
 from .suwayomi.bangumi import (
     alias_boost,
     api_bases,
@@ -176,11 +176,8 @@ class SuwayomiPlugin(Star):
 
     @staticmethod
     def _config_bool(value, default: bool = False) -> bool:
-        if value is None:
-            return default
-        if isinstance(value, str):
-            return value.strip().lower() in {"1", "true", "yes", "on", "开启"}
-        return bool(value)
+        # 与 AI 路径共用 suwayomi.config.config_bool，避免同一开关解析不一致
+        return config_bool(value, default)
 
     def _sync_ai_tools(self):
         enabled = self._config_bool(get_config_value(self.config, "enable_ai_tools", True), True)

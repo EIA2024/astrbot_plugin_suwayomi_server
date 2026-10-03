@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import re
 import shutil
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 import aiohttp
@@ -58,20 +59,38 @@ def _origin_of(url: str) -> str | None:
 
 
 async def _open_without_ssrf_redirect(
-    session: aiohttp.ClientSession, url: str, timeout: aiohttp.ClientTimeout
+    session: aiohttp.ClientSession,
+    url: str,
+    timeout: aiohttp.ClientTimeout,
+    headers: dict[str, str] | None = None,
 ) -> aiohttp.ClientResponse | None:
     """逐跳打开 URL（禁用自动重定向），拒绝跳向第三方私网地址。
 
     aiohttp 默认自动跟随重定向，会绕过 resolve_image_url 的私网地址
     过滤（302 → 127.0.0.1 可被跟随）。以初始 URL 的 origin 为可信基准
     （初始地址已由上游按同服务器/私网规则过滤）：重定向目标仅允许
-    同 origin 或公网地址。被拒/超跳数/缺少 Location 返回 None，调用方
-    按下载失败降级。
+    同 origin 或公网地址，且跨 origin 跳转时丢弃认证头（对齐 aiohttp
+    自动重定向剥离 Authorization 的语义，避免凭据泄露给第三方）。
+    跨源跳转在连接建立后复核对端 IP，命中私网/环回即中止（堵 DNS
+    rebinding 与非常规 IP 编码绕过）。被拒/超跳数/缺少 Location 返回
+    None，调用方按下载失败降级。
     """
     current = url
     trusted_origin = _origin_of(url)
+    hop_headers = dict(headers) if headers else None
     for _ in range(_MAX_REDIRECTS + 1):
-        resp = await session.get(current, timeout=timeout, allow_redirects=False)
+        resp = await session.get(
+            current, timeout=timeout, allow_redirects=False, headers=hop_headers
+        )
+        if (
+            _origin_of(current) != trusted_origin
+            and _is_private_host(_peer_host(resp))
+        ):
+            logger.warning(
+                f"[{_PLUGIN_NAME}] 重定向目标实际连接到私网/环回地址，已中止: {current}"
+            )
+            resp.close()
+            return None
         if resp.status not in _REDIRECT_STATUSES:
             return resp
         location = resp.headers.get("Location")
@@ -88,17 +107,24 @@ async def _open_without_ssrf_redirect(
                 f"[{_PLUGIN_NAME}] 拒绝跟随重定向到不可信地址: {target}"
             )
             return None
+        if target_origin != trusted_origin:
+            # 跨 origin：丢弃认证头，避免泄露给第三方主机
+            hop_headers = None
         current = target
     return None
 
 
 async def download_one(
-    session: aiohttp.ClientSession, url: str, dest: Path, retries: int = 3
+    session: aiohttp.ClientSession,
+    url: str,
+    dest: Path,
+    retries: int = 3,
+    headers: dict[str, str] | None = None,
 ) -> bool:
     for attempt in range(retries):
         try:
             resp = await _open_without_ssrf_redirect(
-                session, url, aiohttp.ClientTimeout(total=30)
+                session, url, aiohttp.ClientTimeout(total=30), headers
             )
             if resp is None:
                 return False
@@ -156,12 +182,11 @@ async def download_images(
     tmp_dir = Path(tempfile.mkdtemp(prefix="suwayomi_", dir=custom_tmp or None))
     try:
         connector = aiohttp.TCPConnector(limit=concurrency)
-        session_kwargs: dict[str, Any] = {"connector": connector}
-        if headers:
-            session_kwargs["headers"] = headers
-        async with aiohttp.ClientSession(**session_kwargs) as session:
+        # headers 逐请求传递（不设 session 级）：跨 origin 跳转由
+        # _open_without_ssrf_redirect 丢弃，避免重定向时泄露认证头
+        async with aiohttp.ClientSession(connector=connector) as session:
             tasks = [
-                download_one(session, url, tmp_dir / f"{i:04d}.jpg", retries)
+                download_one(session, url, tmp_dir / f"{i:04d}.jpg", retries, headers)
                 for i, url in enumerate(urls)
             ]
             results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -184,20 +209,85 @@ async def download_images(
         raise
 
 
+_IPV4_PART_RE = re.compile(r"^(?:0[xX][0-9a-fA-F]+|[0-9]+)$")
+
+
+def _parse_ipv4_part(part: str) -> int:
+    """inet_aton 分段规则：0x 十六进制 / 前导 0 八进制 / 十进制。"""
+    if part.lower().startswith("0x"):
+        return int(part, 16)
+    if len(part) > 1 and part.startswith("0"):
+        return int(part, 8)
+    return int(part, 10)
+
+
+def _parse_loose_ipv4(host: str) -> ipaddress.IPv4Address | None:
+    """解析 inet_aton 兼容写法（2130706433 / 0177.0.0.1 / 0x7f.1 / 127.1）。
+
+    Linux 的 getaddrinfo/inet_aton 接受这些非规范字面量并把它们当作
+    127.0.0.1，仅用 ipaddress 解析会漏判。返回 None 表示不是 IP 字面量。
+    """
+    parts = host.split(".")
+    if not 1 <= len(parts) <= 4:
+        return None
+    if not all(_IPV4_PART_RE.match(part) for part in parts):
+        return None
+    try:
+        nums = [_parse_ipv4_part(part) for part in parts]
+    except ValueError:
+        return None
+    if len(nums) == 1:
+        combined = nums[0]
+    elif len(nums) == 2:
+        if nums[0] > 0xFF or nums[1] > 0xFFFFFF:
+            return None
+        combined = (nums[0] << 24) | nums[1]
+    elif len(nums) == 3:
+        if nums[0] > 0xFF or nums[1] > 0xFF or nums[2] > 0xFFFF:
+            return None
+        combined = (nums[0] << 24) | (nums[1] << 16) | nums[2]
+    else:
+        if any(n > 0xFF for n in nums):
+            return None
+        combined = (nums[0] << 24) | (nums[1] << 16) | (nums[2] << 8) | nums[3]
+    if combined > 0xFFFFFFFF:
+        return None
+    return ipaddress.IPv4Address(combined)
+
+
+def _peer_host(resp) -> str | None:
+    """已连接响应的实际对端 IP；连接信息不可得（测试替身/已关闭）返回 None。"""
+    connection = getattr(resp, "connection", None)
+    transport = getattr(connection, "transport", None)
+    if transport is None:
+        return None
+    try:
+        peer = transport.get_extra_info("peername")
+    except (RuntimeError, OSError):
+        return None
+    if isinstance(peer, (tuple, list)) and peer:
+        return str(peer[0])
+    return None
+
+
 def _is_private_host(hostname: str | None) -> bool:
     """绝对 URL 的主机是否指向私网/环回/链路本地等不可达外网的目标。
 
-    只识别字面 IP 与 localhost；域名解析到内网（DNS rebinding 类）不在此
-    防护范围内，属已知限制。
+    识别字面 IP（含 inet_aton 兼容写法：十进制整数、八进制、十六进制、
+    `127.1` 缩写）与 localhost（含尾点写法）。域名解析到内网（DNS
+    rebinding 类）不在此函数内做 DNS；重定向跳转由下载路径的连接后
+    对端复检兜底，初始 URL 的域名解析仍属已知限制。
     """
-    host = (hostname or "").strip().strip("[]")
+    host = (hostname or "").strip().strip("[]").rstrip(".").lower()
     if not host:
         return False
-    if host.lower() == "localhost":
+    if host == "localhost":
         return True
     try:
         ip = ipaddress.ip_address(host)
     except ValueError:
+        ip = _parse_loose_ipv4(host)
+    if ip is None:
         return False
     return (
         ip.is_private

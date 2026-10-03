@@ -200,17 +200,16 @@ bgm.tv 模糊搜索解析官方译名/别名（top-5 条目 + 日文字形变体
 
 #### `utils/downloader.py` — 图片下载管道
 
-- `download_one(session, url, dest, retries)` — 单图下载，指数退避重试；流式读取并对单响应设 64MB 字节上限（防恶意源超大响应打满内存/磁盘）
-- `download_images(urls, concurrency, custom_tmp, retries, headers)` — 并行批量下载，返回 `(paths, tmp_dir)`。`headers` 参数用于注入认证头（`client.auth_headers`），确保认证服务器下的图片下载正常
+- `download_one(session, url, dest, retries, headers)` — 单图下载，指数退避重试；流式读取并对单响应设 64MB 字节上限（防恶意源超大响应打满内存/磁盘）；禁用自动重定向并逐跳校验目标（同 origin 或公网放行，跳向第三方私网拒绝，上限 4 跳），跨源跳转丢弃 `headers` 并对连接后的实际对端 IP 复检，防 302 绕过 `resolve_image_url` 的私网过滤与凭据泄露
+- `download_images(urls, concurrency, custom_tmp, retries, headers)` — 并行批量下载，返回 `(paths, tmp_dir)`。`headers` 参数用于注入认证头（`client.auth_headers`），逐请求传递（不设 session 级），确保认证服务器下的图片下载正常且跨源重定向不泄露凭据
 - `download_cover(client, thumbnail_url, custom_tmp, retries, headers)` — 下载单张漫画封面到临时目录，返回 `(local_path, tmp_dir)`；失败返回 `(None, None)`，供 `/漫画 章节` 列表顶部展示封面
 - `fetch_pages_local(client, chapter_id, max_pages, concurrency, custom_tmp, retries, headers)` — 获取页面列表并下载到临时目录，返回 `(total_pages, page_urls, local_paths, tmp_dir)`。透传 `headers` 到 `download_images`；文件打包路径（下载/AI 发送/file 推送）统一传 `max_pages=get_file_delivery_max_pages(config)`（配置 `file_delivery_max_pages`，默认 300）
-- `resolve_image_url(client, thumbnail_url, auth_headers)` — 封面 URL 决策：相对路径拼服务器地址并带认证头；绝对 URL 仅同源时附凭据；第三方绝对地址指向私网/环回（字面 IP/localhost）时拒绝（防 SSRF），调用方按无封面降级
-- `download_one(session, url, dest, retries)` — 单张图片下载：禁用自动重定向并逐跳校验目标（同 origin 或公网放行，跳向第三方私网拒绝，上限 4 跳），防 302 绕过 `resolve_image_url` 的私网过滤
+- `resolve_image_url(client, thumbnail_url, auth_headers)` — 封面 URL 决策：相对路径拼服务器地址并带认证头；绝对 URL 仅同源时附凭据；第三方绝对地址指向私网/环回（字面 IP，含十进制/八进制/十六进制写法，以及 localhost 与尾点写法）时拒绝（防 SSRF），调用方按无封面降级
 
 #### `utils/pusher.py` — 推送投递
 
 - `push_chapter_images(client, context, config, umo, title, chapter, fetch_pages_local_fn)` — 推送章节为图片（支持 `send_mode=forward` 合并转发）
-- `push_chapter_file(context, config, umo, title, chapter, fetch_pages_local_fn)` — 推送章节为打包文件（ZIP/CBZ/PDF），页数受 `FILE_DELIVERY_MAX_PAGES` 硬上限
+- `push_chapter_file(context, config, umo, title, chapter, fetch_pages_local_fn)` — 推送章节为打包文件（ZIP/CBZ/PDF），页数上限由 `file_delivery_max_pages` 控制（默认 300，可调）
 - 进入消息链的标题/章节名统一经 `service.sanitize_for_message` 清洗（源站可控文本，防伪造系统提示行）
 - `build_image_chain(...)` — 阅读、自动推送、AI 发送共用的图片/合并转发消息链构建器
 - `schedule_cleanup(tmp_dir, delay)` — 延迟清理临时目录；任务登记到 `_cleanup_tasks`，插件卸载时由 `cancel_pending_cleanups()` 统一取消

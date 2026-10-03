@@ -43,8 +43,9 @@ def sanitize_filename(name: str, max_len: int = 50) -> str:
         c for c in str(name)
         if c not in r'<>:"/\|?*' and ord(c) >= 0x20 and c != "\x7f"
     ).strip()
-    # Windows 不接受结尾的点/空格，保留名（CON/NUL/COM1…）需加前缀绕开
-    cleaned = cleaned.rstrip(". ")[:max_len]
+    # Windows 不接受结尾的点/空格，保留名（CON/NUL/COM1…）需加前缀绕开；
+    # 先截断再去尾点/空格：截断位恰好是点时不留下结尾点
+    cleaned = cleaned[:max_len].rstrip(". ")
     if cleaned.split(".")[0].upper() in _WINDOWS_RESERVED_NAMES:
         cleaned = f"_{cleaned}"
     return cleaned or "untitled"

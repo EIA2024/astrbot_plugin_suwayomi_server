@@ -252,6 +252,11 @@
             <label for="cfg-download_retries">下载重试次数</label>
             <input type="number" id="cfg-download_retries" name="download_retries" min="0" max="10">
           </div>
+          <div class="form-group">
+            <label for="cfg-file_delivery_max_pages">文件打包页数上限</label>
+            <input type="number" id="cfg-file_delivery_max_pages" name="file_delivery_max_pages" min="1" max="2000">
+            <p class="form-hint">整卷/合集章节可合法超过 300 页，推送被截断时按需调大。</p>
+          </div>
         </fieldset>
 
         <fieldset>

@@ -133,6 +133,13 @@ def test_jp_variants_dictionary_covers_builtin_misses():
     assert normalize_for_rank("円") == normalize_for_rank("圆")
 
 
+def test_jp_kokuji_and_rare_shinjitai_covered():
+    """PR #21 复审：JPVariants 未收录的 頬/艶/働 由内置小表兜底。"""
+    assert score_title("颊", "頬") == 1000.0
+    assert score_title("艳", "艶") == 1000.0
+    assert score_title("劳动", "労働") == 1000.0
+
+
 def test_normalize_falls_back_to_builtin_table_when_dictionary_missing(monkeypatch):
     """JPVariants.txt 不可用时整体回落内置小表（転→转 仍生效，优雅退化）。"""
     from plugin_pkg.suwayomi import ranking

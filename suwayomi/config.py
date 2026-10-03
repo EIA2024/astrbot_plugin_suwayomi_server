@@ -141,6 +141,18 @@ def get_config_value(config: dict, key: str, default: Any = None) -> Any:
     return config.get(key, default)
 
 
+def config_bool(value: Any, default: bool = False) -> bool:
+    """布尔配置读取：容忍手改配置文件里的字符串写法（"false"/"0"/"开启"）。
+
+    命令路径与 AI 路径共用，避免同一开关在两条路径解析结果不同。
+    """
+    if value is None:
+        return default
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on", "开启"}
+    return bool(value)
+
+
 def set_config_value(config: dict, key: str, value: Any) -> None:
     """写入配置项到所属分组。
 
